@@ -6,18 +6,24 @@ List and cache all items
 Done:
 - [x] Test run op through rust
 - [x] Op login feed stdin from dmenu
+- [x] store token in a file
+- [x] decode json output
+- [x] Query item list
 
 Stuff to do today:
-- [ ] store token in a file
-- [ ] decode json output
+- [ ] Cache item list in a simple file
+- [ ] Pipe item list into dmenu selector
+- [ ] Get choice from list after dmenu selection
 
 Tomorrow:
-
-After:
+- [ ] Query single item for passwords
 - [ ] Find some libs for:
  - [ ] file cache for the token?
- - [ ] json/yaml coding
- - [ ] command runner
+
+After:
+- [ ] Query for first totp
+- [ ] Calculate all totps by secret
+- [ ] Break up program into sections/modules
 
 Program main function:
 - Display list of items (with accounts) via dmenu, and select one
