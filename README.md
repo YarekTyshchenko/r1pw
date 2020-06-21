@@ -13,21 +13,21 @@ Done:
 - [x] Pipe item list into dmenu selector
 - [x] Get choice from list after dmenu selection
 - [x] Query single item for passwords
+- [x] Copy password value into clipboard
 
 Stuff to do today:
-- [ ] Copy password value into clipboard
 - [ ] Cache item list in a simple file
-
-Tomorrow:
 - [ ] Switch everything to use rust logger
 https://rust-lang-nursery.github.io/rust-cookbook/development_tools/debugging/log.html
+
+Tomorrow:
+- [ ] Calculate all totps by secret
+- [ ] Break up program into sections/modules
 - [ ] Find some libs for:
  - [ ] file cache for the token?
 
 After:
 - [ ] Query for first totp
-- [ ] Calculate all totps by secret
-- [ ] Break up program into sections/modules
 
 Program main function:
 - Display list of items (with accounts) via dmenu, and select one
