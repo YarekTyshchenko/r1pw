@@ -19,6 +19,8 @@ Stuff to do today:
 - [ ] Cache item list in a simple file
 
 Tomorrow:
+- [ ] Switch everything to use rust logger
+https://rust-lang-nursery.github.io/rust-cookbook/development_tools/debugging/log.html
 - [ ] Find some libs for:
  - [ ] file cache for the token?
 

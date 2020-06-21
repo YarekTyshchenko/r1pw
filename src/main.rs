@@ -39,7 +39,19 @@ fn main() {
     let credential = get_credentials(selection, &token);
     let field = display_credential_selection(&credential);
     // copy into paste buffer
+    copy_to_clipboard(field);
+}
+
+fn copy_to_clipboard(field: &Field) {
     println!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
+    let mut copy = Command::new("xsel")
+        .arg("-b")
+        .stdin(Stdio::piped())
+        .spawn().unwrap();
+    let mut stdin = copy.stdin.take().unwrap();
+    stdin.write_all(field.value.as_bytes()).unwrap();
+    drop(stdin);
+    copy.wait().unwrap();
 }
 
 #[derive(Debug, Deserialize)]
