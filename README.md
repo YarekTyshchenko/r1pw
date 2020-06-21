@@ -9,14 +9,16 @@ Done:
 - [x] store token in a file
 - [x] decode json output
 - [x] Query item list
+- [x] Login if fetch failed
+- [x] Pipe item list into dmenu selector
+- [x] Get choice from list after dmenu selection
+- [x] Query single item for passwords
 
 Stuff to do today:
+- [ ] Copy password value into clipboard
 - [ ] Cache item list in a simple file
-- [ ] Pipe item list into dmenu selector
-- [ ] Get choice from list after dmenu selection
 
 Tomorrow:
-- [ ] Query single item for passwords
 - [ ] Find some libs for:
  - [ ] file cache for the token?
 
