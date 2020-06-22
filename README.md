@@ -14,13 +14,13 @@ Done:
 - [x] Get choice from list after dmenu selection
 - [x] Query single item for passwords
 - [x] Copy password value into clipboard
+- [x] Switch everything to use rust logger
 
 Stuff to do today:
 - [ ] Cache item list in a simple file
-- [ ] Switch everything to use rust logger
-https://rust-lang-nursery.github.io/rust-cookbook/development_tools/debugging/log.html
 
 Tomorrow:
+- [ ] Handle all cancellations properly
 - [ ] Calculate all totps by secret
 - [ ] Break up program into sections/modules
 - [ ] Find some libs for:
@@ -28,6 +28,7 @@ Tomorrow:
 
 After:
 - [ ] Query for first totp
+- [ ] Support multiple accounts
 
 Program main function:
 - Display list of items (with accounts) via dmenu, and select one

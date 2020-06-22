@@ -3,11 +3,12 @@ use std::io::{Write, Read};
 use std::path::Path;
 use std::fs::{File, OpenOptions};
 use std::io;
-
+use log::{info, error, debug};
 use serde::Deserialize;
 
 // Main flow
 fn main() {
+    pretty_env_logger::init();
     // show previous selected item, if set.
     // check token exists
     let token_path = shellexpand::full("~/.config/1pw/token").unwrap().into_owned();
@@ -15,7 +16,7 @@ fn main() {
     let token = match read_token_from_path(token_path) {
         Ok(t) => t,
         Err(e) => {
-            println!("Error {}", e);
+            debug!("Error {}", e);
             let t = attempt_login().expect("Unable to get token");
             let t = t.trim().to_owned();
             // if success, save token
@@ -24,7 +25,7 @@ fn main() {
             t
         },
     };
-    println!("Token: '{}'", token);
+    debug!("Token: '{}'", token);
     // if cancelled, proceed
 
     // Wrap this in cache
@@ -43,7 +44,7 @@ fn main() {
 }
 
 fn copy_to_clipboard(field: &Field) {
-    println!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
+    debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
     let mut copy = Command::new("xsel")
         .arg("-b")
         .stdin(Stdio::piped())
@@ -74,15 +75,15 @@ fn get_items(token: &str) -> Option<Vec<Item>> {
         .arg("list").arg("items")
         .arg("--session").arg(token)
         .output().unwrap();
-    println!("status: {}", op.status);
+    debug!("status: {}", op.status);
     if ! op.status.success() {
         return None
     }
-    println!("stderr: {}", String::from_utf8(op.stderr).unwrap());
+    debug!("stderr: {}", String::from_utf8(op.stderr).unwrap());
     let items = String::from_utf8(op.stdout).unwrap();
-    println!("items: {}", items);
+    debug!("items: {}", items);
     let items: Vec<Item> = serde_json::from_str(&items).unwrap();
-    println!("Items: {:?}", items);
+    debug!("Items: {:?}", items);
     Some(items)
 }
 
@@ -94,7 +95,7 @@ fn read_token_from_path(path: &Path) -> io::Result<String> {
 }
 
 fn save_token(token: &str, token_path: &Path) -> Option<()> {
-    println!("Attempting to save token {} to path {}", token, token_path.to_str().unwrap());
+    debug!("Attempting to save token {} to path {}", token, token_path.to_str().unwrap());
     std::fs::create_dir_all(token_path.parent().unwrap()).unwrap();
     let mut file = OpenOptions::new()
         .create(true)
@@ -131,8 +132,8 @@ fn display_item_selection(items: &Vec<Item>) -> &Item {
     let output = dmenu.wait_with_output().ok().unwrap();
     let choice = String::from_utf8_lossy(&output.stdout);
     let choice = choice.trim();
-    println!("dmenu status: {}", output.status);
-    println!("Choice: {}", choice);
+    debug!("dmenu status: {}", output.status);
+    debug!("Choice: {}", choice);
     // return item
     let foo = items.iter().find(|&i| i.overview.title == choice).unwrap();
     foo
@@ -168,7 +169,7 @@ fn get_credentials(selection: &Item, token: &str) -> Credential {
     // get a list of credentials
     let output = String::from_utf8_lossy(&op.stdout);
     let output = output.trim();
-    println!("Creds: {}", output);
+    debug!("Creds: {}", output);
     let credential: Credential = serde_json::from_str(output).unwrap();
     // Optionally top up with totp
     credential
@@ -222,12 +223,12 @@ fn attempt_login() -> Option<String> {
 
     // Feed password to stdin of op
     stdin.write_all(format!("{}\n", pw).as_bytes()).ok()?;
-    println!("Waiting for process to finish");
+    debug!("Waiting for process to finish");
     let output = process.wait_with_output().ok()?;
-    println!("Done waiting.");
+    debug!("Done waiting.");
     // read token from stdout
     let token = String::from_utf8_lossy(&output.stdout).into_owned();
-    println!("Token is : {}", token);
+    debug!("Token is : {}", token);
     Some(token)
 }
 
@@ -238,7 +239,7 @@ fn prompt_dmenu(prompt: &str) -> String {
         .arg("-nb").arg("black")
         .arg("-nf").arg("black")
         .output().unwrap();
-    println!("status: {}", dmenu.status);
+    debug!("status: {}", dmenu.status);
     let pw = String::from_utf8(dmenu.stdout).unwrap();
     pw
 }
