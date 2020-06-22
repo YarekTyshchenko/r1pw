@@ -1,8 +1,10 @@
-3 steps:
+Rust One Password Utility
+=========================
 
-List and cache all items
-- Serialise object to a yaml file
+Plumbs `op` with `dmenu`. Requires correct setup of `op` to work.
 
+Todo
+----
 Done:
 - [x] Test run op through rust
 - [x] Op login feed stdin from dmenu
@@ -17,9 +19,11 @@ Done:
 - [x] Switch everything to use rust logger
 
 Stuff to do today:
+- [ ] Refactor program flow
 - [ ] Cache item list in a simple file
 
 Tomorrow:
+- [ ] Display previously selected item for quick access
 - [ ] Handle all cancellations properly
 - [ ] Calculate all totps by secret
 - [ ] Break up program into sections/modules
@@ -29,19 +33,3 @@ Tomorrow:
 After:
 - [ ] Query for first totp
 - [ ] Support multiple accounts
-
-Program main function:
-- Display list of items (with accounts) via dmenu, and select one
-- display a list of credentials for selection
-- Repopulate cache
-
-Notes:
-- If item isn't in cache, repopulate cache
-
-Program Flow:
-
-- Read token from cache, escape to abort
-- if not found, assume login required
-    - login, save token to cache
-
-- 

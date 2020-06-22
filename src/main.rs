@@ -3,17 +3,16 @@ use std::io::{Write, Read};
 use std::path::Path;
 use std::fs::{File, OpenOptions};
 use std::io;
-use log::{info, error, debug};
+use log::{error, debug};
 use serde::Deserialize;
 
+const TOKEN_PATH: &str = "~/.config/1pw/token";
 // Main flow
 fn main() {
     pretty_env_logger::init();
     // show previous selected item, if set.
     // check token exists
-    let token_path = shellexpand::full("~/.config/1pw/token").unwrap().into_owned();
-    let token_path = Path::new(&token_path);
-    let token = match read_token_from_path(token_path) {
+    let token = match read_token_from_path() {
         Ok(t) => t,
         Err(e) => {
             debug!("Error {}", e);
@@ -21,7 +20,7 @@ fn main() {
             let t = t.trim().to_owned();
             // if success, save token
             // if failed, exit
-            save_token(&t, &token_path).expect("Unable to save new token");
+            save_token(&t).expect("Unable to save new token");
             t
         },
     };
@@ -31,7 +30,7 @@ fn main() {
     // Wrap this in cache
     let items = get_items(&token).unwrap_or_else(|| {
         let t = attempt_login().unwrap().trim().to_owned();
-        save_token(&t, &token_path);
+        save_token(&t);
         get_items(&t).unwrap()
     });
     let selection = display_item_selection(&items);
@@ -76,14 +75,19 @@ fn get_items(token: &str) -> Option<Vec<Item>> {
     Some(items)
 }
 
-fn read_token_from_path(path: &Path) -> io::Result<String> {
-    let mut f = File::open(path)?;
+fn read_token_from_path() -> io::Result<String> {
+    let token_path = shellexpand::full(TOKEN_PATH).unwrap().into_owned();
+    let token_path = Path::new(&token_path);
+    let mut f = File::open(token_path)?;
     let mut s = String::new();
     f.read_to_string(&mut s)?;
     Ok(s)
 }
 
-fn save_token(token: &str, token_path: &Path) -> Option<()> {
+fn save_token(token: &str) -> Option<()> {
+    let token_path = shellexpand::full(TOKEN_PATH).unwrap().into_owned();
+    let token_path = Path::new(&token_path);
+
     debug!("Attempting to save token {} to path {}", token, token_path.to_str().unwrap());
     std::fs::create_dir_all(token_path.parent().unwrap()).unwrap();
     let mut file = OpenOptions::new()

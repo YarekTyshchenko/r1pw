@@ -1,0 +1,18 @@
+digraph G {
+  Start -> "Token Exists"
+
+  "Token Exists" -> "Read Cache" [label=Yes]
+  "Token Exists" -> "Attempt Login" [label=No]
+
+  "Attempt Login" -> "Save token" [label=Success]
+  "Attempt Login" -> Exit [label=Failure]
+  "Attempt Login" -> "Read Cache" [label=Cancel]
+  "Save token" -> "Read Cache"
+
+  "Read Cache" -> "Update Cache"
+
+  "Update Cache" -> Exit [label=Success]
+  "Update Cache" -> "Clear Token" [label=Failure]
+
+  "Clear Token" -> Exit
+}
