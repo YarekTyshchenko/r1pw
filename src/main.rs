@@ -71,19 +71,8 @@ struct Overview {
 }
 
 fn get_items(token: &str) -> Option<Vec<Item>> {
-    let op = Command::new("op")
-        .arg("list").arg("items")
-        .arg("--session").arg(token)
-        .output().unwrap();
-    debug!("status: {}", op.status);
-    if ! op.status.success() {
-        return None
-    }
-    debug!("stderr: {}", String::from_utf8(op.stderr).unwrap());
-    let items = String::from_utf8(op.stdout).unwrap();
-    debug!("items: {}", items);
-    let items: Vec<Item> = serde_json::from_str(&items).unwrap();
-    debug!("Items: {:?}", items);
+    let items = op("", ["list", "items", "--session", token].to_vec())?;
+    let items: Vec<Item> = serde_json::from_str(&items).ok()?;
     Some(items)
 }
 
@@ -108,31 +97,15 @@ fn save_token(token: &str, token_path: &Path) -> Option<()> {
 }
 
 fn display_item_selection(items: &Vec<Item>) -> &Item {
-    // pipe to dmenu, and listen for choice
-    let mut dmenu = Command::new("dmenu")
-        .arg("-b")
-        .arg("-l")
-        .arg("40")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn().unwrap();
     // Feed list to dmenu on stdin
     let mut input: Vec<String> = Vec::new();
-    let mut stdin = dmenu.stdin.take().unwrap();
     for item in items {
         //input.push(format!("{} (uuid: {})", item.overview.title, item.uuid));
         input.push(item.overview.title.to_owned());
     }
 
-    stdin.write_all(input.join("\n").as_bytes()).unwrap();
-    stdin.flush().unwrap();
-    drop(stdin);
+    let choice = select_dmenu(&input.join("\n"));
     // Find choice in list
-    let output = dmenu.wait_with_output().ok().unwrap();
-    let choice = String::from_utf8_lossy(&output.stdout);
-    let choice = choice.trim();
-    debug!("dmenu status: {}", output.status);
     debug!("Choice: {}", choice);
     // return item
     let foo = items.iter().find(|&i| i.overview.title == choice).unwrap();
@@ -162,15 +135,9 @@ struct Field {
 
 fn get_credentials(selection: &Item, token: &str) -> Credential {
     // Query op for title / uuid of the item
-    let op = Command::new("op")
-        .arg("get").arg("item").arg(&selection.uuid)
-        .arg("--session").arg(token)
-        .output().unwrap();
-    // get a list of credentials
-    let output = String::from_utf8_lossy(&op.stdout);
-    let output = output.trim();
-    debug!("Creds: {}", output);
-    let credential: Credential = serde_json::from_str(output).unwrap();
+    let output = op("", ["get", "item", &selection.uuid, "--session", token].to_vec()).unwrap();
+    //debug!("Creds: {}", output);
+    let credential: Credential = serde_json::from_str(&output).unwrap();
     // Optionally top up with totp
     credential
 }
@@ -180,66 +147,70 @@ fn format_field(field: &Field) -> String {
 }
 
 fn display_credential_selection(credential: &Credential) -> &Field {
-    let mut dmenu = Command::new("dmenu")
-        .arg("-b").arg("-l").arg("20")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn().unwrap();
-    // prepare a list of credentials to copy for dmenu
     let mut input: Vec<String> = Vec::new();
     for field in &credential.details.fields {
         input.push(format_field(field));
     }
-    // pipe to dmenu, and listen for choice
-    let mut stdin = dmenu.stdin.take().unwrap();
-    stdin.write_all(input.join("\n").as_bytes()).unwrap();
-    drop(stdin);
-
-    let output = dmenu.wait_with_output().unwrap();
-    let choice = String::from_utf8_lossy(&output.stdout);
-    let choice = choice.trim();
+    let choice = select_dmenu(&input.join("\n"));
     // find choice in list
     let foo = credential.details.fields.iter().find(|&f| format_field(f) == choice).unwrap();
     // return item
     foo
 }
 
-// @TODO: op tool is silent when no tty is present
 fn attempt_login() -> Option<String> {
+    let pw = prompt_dmenu("Unlock:");
+    op(&(pw+"\n"), ["signin", "--output=raw"].to_vec())
+}
+
+fn select_dmenu(input: &str) -> String {
+    dmenu(input, ["-b", "-l", "20"].to_vec())
+}
+
+fn prompt_dmenu(prompt: &str) -> String {
+    dmenu("", ["-b", "-p", prompt, "-nb", "black", "-nf", "black"].to_vec())
+}
+
+fn dmenu(input: &str, args: Vec<&str>) -> String {
+    let mut dmenu = Command::new("dmenu")
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn().unwrap();
+    let mut stdin = dmenu.stdin.take().unwrap();
+    stdin.write_all(input.as_bytes()).unwrap();
+    drop(stdin);
+
+    let output = dmenu.wait_with_output().unwrap();
+    let choice = String::from_utf8_lossy(&output.stdout);
+    let choice = choice.trim();
+    choice.to_owned()
+}
+
+fn op(input: &str, args: Vec<&str>) -> Option<String> {
     // Spawn signing, read out pipe for prompt
     let mut process = Command::new(
         "/usr/local/bin/op"
         //"./mock.sh"
     )
-        .arg("signin")
-        .arg("--output=raw")
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn().ok()?;
-    let mut stdin = process.stdin.take()?;
-    let pw = prompt_dmenu("Unlock:");
-
-    // Feed password to stdin of op
-    stdin.write_all(format!("{}\n", pw).as_bytes()).ok()?;
+        .spawn().unwrap();
+    let mut stdin = process.stdin.take().unwrap();
+    // Feed to stdin of op
+    stdin.write_all(input.as_bytes()).unwrap();
+    drop(stdin);
     debug!("Waiting for process to finish");
-    let output = process.wait_with_output().ok()?;
+    let output = process.wait_with_output().unwrap();
+    if ! output.status.success() {
+        error!("op command failed with {}", String::from_utf8_lossy(&output.stderr));
+        return None
+    }
     debug!("Done waiting.");
-    // read token from stdout
-    let token = String::from_utf8_lossy(&output.stdout).into_owned();
-    debug!("Token is : {}", token);
-    Some(token)
-}
-
-fn prompt_dmenu(prompt: &str) -> String {
-    let dmenu = Command::new("dmenu")
-        .arg("-b")
-        .arg("-p").arg(prompt)
-        .arg("-nb").arg("black")
-        .arg("-nf").arg("black")
-        .output().unwrap();
-    debug!("status: {}", dmenu.status);
-    let pw = String::from_utf8(dmenu.stdout).unwrap();
-    pw
+    // read from stdout
+    let output = String::from_utf8_lossy(&output.stdout).into_owned();
+    Some(output)
 }
