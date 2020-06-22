@@ -1,9 +1,9 @@
-use std::process::{Command, Stdio};
+use std::process::{Command, Stdio, ExitStatus, exit};
 use std::io::{Write, Read};
 use std::path::Path;
-use std::fs::{File, OpenOptions};
+use std::fs::{File, OpenOptions, read};
 use std::io;
-use log::{error, debug};
+use log::*;
 use serde::Deserialize;
 
 const TOKEN_PATH: &str = "~/.config/1pw/token";
@@ -12,27 +12,33 @@ fn main() {
     pretty_env_logger::init();
     // show previous selected item, if set.
     // check token exists
-    let token = match read_token_from_path() {
-        Ok(t) => t,
-        Err(e) => {
-            debug!("Error {}", e);
-            let t = attempt_login().expect("Unable to get token");
-            let t = t.trim().to_owned();
-            // if success, save token
-            // if failed, exit
-            save_token(&t).expect("Unable to save new token");
+    let token = read_token_from_path()
+        .map(Some)
+        .unwrap_or_else(|e| {
+            warn!("Token not found: {}", e);
+            let t = match attempt_login() {
+                Ok(t) => {
+                    save_token(&t).expect("Unable to save new token");
+                    Some(t)
+                },
+                Err(LoginError::Cancelled()) => None,
+                Err(e) => panic!(e),
+            };
             t
-        },
-    };
-    debug!("Token: '{}'", token);
+        });
+
+    debug!("Token: '{:?}'", token);
     // if cancelled, proceed
 
-    // Wrap this in cache
-    let items = get_items(&token).unwrap_or_else(|| {
-        let t = attempt_login().unwrap().trim().to_owned();
-        save_token(&t);
-        get_items(&t).unwrap()
-    });
+    // @TODO: Implement caching here
+    let token = token.expect("Unable to proceed because cache isn't implemented");
+    let items = get_items(&token).map_err(|e| {
+        // Unable to get items, clearing token and exit
+        clear_token().unwrap();
+        e
+    }).unwrap();
+
+
     let selection = display_item_selection(&items);
     // save previous item selection
 
@@ -69,15 +75,17 @@ struct Overview {
     tags: Option<Vec<String>>,
 }
 
-fn get_items(token: &str) -> Option<Vec<Item>> {
+fn get_items(token: &str) -> Result<Vec<Item>, OpError> {
     let items = op("", ["list", "items", "--session", token].to_vec())?;
-    let items: Vec<Item> = serde_json::from_str(&items).ok()?;
-    Some(items)
+    // Deserialisation issues should panic
+    let items: Vec<Item> = serde_json::from_str(&items).unwrap();
+    Ok(items)
 }
 
+
 fn read_token_from_path() -> io::Result<String> {
-    let token_path = shellexpand::full(TOKEN_PATH).unwrap().into_owned();
-    let token_path = Path::new(&token_path);
+    let token_path = shellexpand::full(TOKEN_PATH).unwrap();
+    let token_path = Path::new(token_path.as_ref());
     let mut f = File::open(token_path)?;
     let mut s = String::new();
     f.read_to_string(&mut s)?;
@@ -98,6 +106,12 @@ fn save_token(token: &str) -> Option<()> {
         .unwrap();
     file.write_all(token.as_bytes()).unwrap();
     Some(())
+}
+
+fn clear_token() -> io::Result<()> {
+    let token_path = shellexpand::full(TOKEN_PATH).unwrap();
+    let token_path = Path::new(token_path.as_ref());
+    std::fs::remove_file(token_path)
 }
 
 fn display_item_selection(items: &Vec<Item>) -> &Item {
@@ -162,37 +176,71 @@ fn display_credential_selection(credential: &Credential) -> &Field {
     foo
 }
 
-fn attempt_login() -> Option<String> {
-    let pw = prompt_dmenu("Unlock:");
-    op(&(pw+"\n"), ["signin", "--output=raw"].to_vec())
+#[derive(Debug)]
+enum LoginError {
+    Cancelled(),
+    FailedDmenu(io::Error),
+    FailedOp(OpError),
+}
+
+fn attempt_login() -> Result<String, LoginError> {
+    let pw = match prompt_dmenu("Unlock:") {
+        Ok(pw) => Ok(pw),
+        Err(DmenuError::Cancelled()) => Err(LoginError::Cancelled()),
+        Err(DmenuError::Io(e)) => Err(LoginError::FailedDmenu(e)),
+    }.unwrap();
+    let token = op(&(pw+"\n"), ["signin", "--output=raw"].to_vec());
+    let token = match token {
+        Ok(t) => t,
+        Err(OpError::Io(e)) => panic!("IO Troubles: {}", e),
+        Err(OpError::CommandError(code, reason)) => panic!("Op exit code {} with error: {}", code, reason),
+    };
+    let token = token.trim().to_owned();
+    Ok(token)
 }
 
 fn select_dmenu(input: &str) -> String {
-    dmenu(input, ["-b", "-l", "20"].to_vec())
+    dmenu(input, ["-b", "-l", "20"].to_vec()).unwrap()
 }
 
-fn prompt_dmenu(prompt: &str) -> String {
+fn prompt_dmenu(prompt: &str) -> Result<String, DmenuError> {
     dmenu("", ["-b", "-p", prompt, "-nb", "black", "-nf", "black"].to_vec())
 }
 
-fn dmenu(input: &str, args: Vec<&str>) -> String {
+#[derive(Debug)]
+enum DmenuError {
+    Cancelled(),
+    Io(io::Error),
+}
+
+fn dmenu(input: &str, args: Vec<&str>) -> Result<String, DmenuError> {
     let mut dmenu = Command::new("dmenu")
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn().unwrap();
+        .spawn().map_err(DmenuError::Io)?;
     let mut stdin = dmenu.stdin.take().unwrap();
-    stdin.write_all(input.as_bytes()).unwrap();
+    stdin.write_all(input.as_bytes()).map_err(DmenuError::Io)?;
     drop(stdin);
 
-    let output = dmenu.wait_with_output().unwrap();
+    let output = dmenu.wait_with_output().map_err(DmenuError::Io)?;
+    if ! output.status.success() {
+        warn!("Dmenu process cancelled with exit code {:?}", output.status.code());
+        return Err(DmenuError::Cancelled());
+    }
     let choice = String::from_utf8_lossy(&output.stdout);
     let choice = choice.trim();
-    choice.to_owned()
+    Ok(choice.to_owned())
 }
 
-fn op(input: &str, args: Vec<&str>) -> Option<String> {
+#[derive(Debug)]
+enum OpError {
+    Io(io::Error),
+    CommandError(ExitStatus, String),
+}
+
+fn op(input: &str, args: Vec<&str>) -> Result<String, OpError> {
     // Spawn signing, read out pipe for prompt
     let mut process = Command::new(
         "/usr/local/bin/op"
@@ -202,19 +250,20 @@ fn op(input: &str, args: Vec<&str>) -> Option<String> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn().unwrap();
+        .spawn().map_err(OpError::Io)?;
+    // Stdin must always exist
     let mut stdin = process.stdin.take().unwrap();
     // Feed to stdin of op
-    stdin.write_all(input.as_bytes()).unwrap();
+    stdin.write_all(input.as_bytes()).map_err(OpError::Io)?;
     drop(stdin);
     debug!("Waiting for process to finish");
-    let output = process.wait_with_output().unwrap();
+    let output = process.wait_with_output().map_err(OpError::Io)?;
     if ! output.status.success() {
         error!("op command failed with {}", String::from_utf8_lossy(&output.stderr));
-        return None
+        return Err(OpError::CommandError(output.status, "Foo".to_owned()));
     }
     debug!("Done waiting.");
     // read from stdout
     let output = String::from_utf8_lossy(&output.stdout).into_owned();
-    Some(output)
+    Ok(output)
 }
