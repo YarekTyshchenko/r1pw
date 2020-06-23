@@ -9,16 +9,15 @@ use dmenu::{DmenuError};
 use std::io;
 use log::*;
 use itertools::Itertools;
+use anyhow::Result;
 
 // Main flow
-fn main() {
+fn main() -> Result<()>{
     pretty_env_logger::init();
-    // show previous selected item, if set.
+    // @TODO: show previous selected item, if set.
     // check token exists
-    let token = cache::read_token_from_path()
-        .map(Some)
-        .unwrap_or_else(|e| {
-            warn!("Token not found: {}", e);
+    let token = cache::read_token_from_path()?
+        .or_else(|| {
             let t = match attempt_login() {
                 Ok(t) => {
                     cache::save_token(&t).expect("Unable to save new token");
@@ -51,6 +50,7 @@ fn main() {
 
     debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
     clipboard::copy_to_clipboard(&field.value);
+    Ok(())
 }
 
 #[derive(Debug)]

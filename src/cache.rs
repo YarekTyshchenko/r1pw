@@ -1,18 +1,23 @@
+use anyhow::{Context, Result};
 use std::io;
-use std::io::{Write, Read};
+use std::io::Write;
 use std::path::Path;
-use std::fs::{OpenOptions, File};
+use std::fs::OpenOptions;
 use log::debug;
 
 const TOKEN_PATH: &str = "~/.config/1pw/token";
 
-pub fn read_token_from_path() -> io::Result<String> {
-    let token_path = shellexpand::full(TOKEN_PATH).unwrap();
+pub fn read_token_from_path() -> Result<Option<String>> {
+    let token_path = shellexpand::full(TOKEN_PATH)
+        .with_context(|| format!("Token path {} is invalid", TOKEN_PATH))?;
+
     let token_path = Path::new(token_path.as_ref());
-    let mut f = File::open(token_path)?;
-    let mut s = String::new();
-    f.read_to_string(&mut s)?;
-    Ok(s)
+    // Error opening file
+    match std::fs::read_to_string(token_path) {
+        Ok(s) => Ok(Some(s)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }.with_context(|| format!("Error opening file {:?}", token_path))
 }
 
 pub fn save_token(token: &str) -> Option<()> {
