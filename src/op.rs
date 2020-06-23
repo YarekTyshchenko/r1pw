@@ -56,6 +56,12 @@ pub fn get_credentials(selection: &Item, token: &str) -> Credential {
     credential
 }
 
+pub fn login(unlock: &str) -> Result<String, OpError> {
+    let token = op(&format!("{}\n", unlock), ["signin", "--output=raw"].to_vec())?;
+    let token = token.trim().to_owned();
+    Ok(token)
+}
+
 #[derive(Debug)]
 pub enum OpError {
     Io(io::Error),
