@@ -1,10 +1,13 @@
-use std::process::{Command, Stdio, ExitStatus, exit};
+extern crate r1pw;
+
+use r1pw::*;
+
 use std::io::{Write, Read};
 use std::path::Path;
-use std::fs::{File, OpenOptions, read};
+use std::fs::{File, OpenOptions};
 use std::io;
 use log::*;
-use serde::Deserialize;
+use itertools::Itertools;
 
 const TOKEN_PATH: &str = "~/.config/1pw/token";
 // Main flow
@@ -45,43 +48,33 @@ fn main() {
     let credential = get_credentials(selection, &token);
     let field = display_credential_selection(&credential);
     // copy into paste buffer
-    copy_to_clipboard(field);
-}
 
-fn copy_to_clipboard(field: &Field) {
     debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
-    let mut copy = Command::new("xsel")
-        .arg("-b")
-        .stdin(Stdio::piped())
-        .spawn().unwrap();
-    let mut stdin = copy.stdin.take().unwrap();
-    stdin.write_all(field.value.as_bytes()).unwrap();
-    drop(stdin);
-    copy.wait().unwrap();
+    copy_to_clipboard(&field.value);
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Item {
-    uuid: String,
-    overview: Overview,
+#[derive(Debug)]
+pub enum LoginError {
+    Cancelled(),
+    FailedDmenu(io::Error),
+    FailedOp(OpError),
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Overview {
-    title: String,
-    url: Option<String>,
-    tags: Option<Vec<String>>,
+pub fn attempt_login() -> Result<String, LoginError> {
+    let pw = match prompt_dmenu("Unlock:") {
+        Ok(pw) => Ok(pw),
+        Err(DmenuError::Cancelled()) => Err(LoginError::Cancelled()),
+        Err(DmenuError::Io(e)) => Err(LoginError::FailedDmenu(e)),
+    }.unwrap();
+    let token = login_op(&pw);
+    let token = match token {
+        Ok(t) => t,
+        Err(OpError::Io(e)) => panic!("IO Troubles: {}", e),
+        Err(OpError::CommandError(code, reason)) => panic!("Op exit code {} with error: {}", code, reason),
+    };
+    let token = token.trim().to_owned();
+    Ok(token)
 }
-
-fn get_items(token: &str) -> Result<Vec<Item>, OpError> {
-    let items = op("", ["list", "items", "--session", token].to_vec())?;
-    // Deserialisation issues should panic
-    let items: Vec<Item> = serde_json::from_str(&items).unwrap();
-    Ok(items)
-}
-
 
 fn read_token_from_path() -> io::Result<String> {
     let token_path = shellexpand::full(TOKEN_PATH).unwrap();
@@ -116,13 +109,10 @@ fn clear_token() -> io::Result<()> {
 
 fn display_item_selection(items: &Vec<Item>) -> &Item {
     // Feed list to dmenu on stdin
-    let mut input: Vec<String> = Vec::new();
-    for item in items {
-        //input.push(format!("{} (uuid: {})", item.overview.title, item.uuid));
-        input.push(item.overview.title.to_owned());
-    }
-
-    let choice = select_dmenu(&input.join("\n"));
+    let input = items.iter()
+        .map(|item| item.overview.title.to_owned())
+        .join("\n");
+    let choice = select_dmenu(&input);
     // Find choice in list
     debug!("Choice: {}", choice);
     // return item
@@ -130,140 +120,17 @@ fn display_item_selection(items: &Vec<Item>) -> &Item {
     foo
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Credential {
-    uuid: String,
-    details: Details,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Details {
-    fields: Vec<Field>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Field {
-    designation: String,
-    name: String,
-    value: String,
-}
-
-fn get_credentials(selection: &Item, token: &str) -> Credential {
-    // Query op for title / uuid of the item
-    let output = op("", ["get", "item", &selection.uuid, "--session", token].to_vec()).unwrap();
-    //debug!("Creds: {}", output);
-    let credential: Credential = serde_json::from_str(&output).unwrap();
-    // Optionally top up with totp
-    credential
-}
-
 fn format_field(field: &Field) -> String {
-    format!("{} ({}) Field name: {}", field.designation, field.value, field.name)
+    format!("Designation: {}, Field name: {}, Value: {}", field.designation, field.name, field.value)
 }
 
 fn display_credential_selection(credential: &Credential) -> &Field {
-    let mut input: Vec<String> = Vec::new();
-    for field in &credential.details.fields {
-        input.push(format_field(field));
-    }
-    let choice = select_dmenu(&input.join("\n"));
+    let input = credential.details.fields.iter()
+        .map(|field| format_field(field))
+        .join("\n");
+    let choice = select_dmenu(&input);
     // find choice in list
     let foo = credential.details.fields.iter().find(|&f| format_field(f) == choice).unwrap();
     // return item
     foo
-}
-
-#[derive(Debug)]
-enum LoginError {
-    Cancelled(),
-    FailedDmenu(io::Error),
-    FailedOp(OpError),
-}
-
-fn attempt_login() -> Result<String, LoginError> {
-    let pw = match prompt_dmenu("Unlock:") {
-        Ok(pw) => Ok(pw),
-        Err(DmenuError::Cancelled()) => Err(LoginError::Cancelled()),
-        Err(DmenuError::Io(e)) => Err(LoginError::FailedDmenu(e)),
-    }.unwrap();
-    let token = op(&(pw+"\n"), ["signin", "--output=raw"].to_vec());
-    let token = match token {
-        Ok(t) => t,
-        Err(OpError::Io(e)) => panic!("IO Troubles: {}", e),
-        Err(OpError::CommandError(code, reason)) => panic!("Op exit code {} with error: {}", code, reason),
-    };
-    let token = token.trim().to_owned();
-    Ok(token)
-}
-
-fn select_dmenu(input: &str) -> String {
-    dmenu(input, ["-b", "-l", "20"].to_vec()).unwrap()
-}
-
-fn prompt_dmenu(prompt: &str) -> Result<String, DmenuError> {
-    dmenu("", ["-b", "-p", prompt, "-nb", "black", "-nf", "black"].to_vec())
-}
-
-#[derive(Debug)]
-enum DmenuError {
-    Cancelled(),
-    Io(io::Error),
-}
-
-fn dmenu(input: &str, args: Vec<&str>) -> Result<String, DmenuError> {
-    let mut dmenu = Command::new("dmenu")
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn().map_err(DmenuError::Io)?;
-    let mut stdin = dmenu.stdin.take().unwrap();
-    stdin.write_all(input.as_bytes()).map_err(DmenuError::Io)?;
-    drop(stdin);
-
-    let output = dmenu.wait_with_output().map_err(DmenuError::Io)?;
-    if ! output.status.success() {
-        warn!("Dmenu process cancelled with exit code {:?}", output.status.code());
-        return Err(DmenuError::Cancelled());
-    }
-    let choice = String::from_utf8_lossy(&output.stdout);
-    let choice = choice.trim();
-    Ok(choice.to_owned())
-}
-
-#[derive(Debug)]
-enum OpError {
-    Io(io::Error),
-    CommandError(ExitStatus, String),
-}
-
-fn op(input: &str, args: Vec<&str>) -> Result<String, OpError> {
-    // Spawn signing, read out pipe for prompt
-    let mut process = Command::new(
-        "/usr/local/bin/op"
-        //"./mock.sh"
-    )
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn().map_err(OpError::Io)?;
-    // Stdin must always exist
-    let mut stdin = process.stdin.take().unwrap();
-    // Feed to stdin of op
-    stdin.write_all(input.as_bytes()).map_err(OpError::Io)?;
-    drop(stdin);
-    debug!("Waiting for process to finish");
-    let output = process.wait_with_output().map_err(OpError::Io)?;
-    if ! output.status.success() {
-        error!("op command failed with {}", String::from_utf8_lossy(&output.stderr));
-        return Err(OpError::CommandError(output.status, "Foo".to_owned()));
-    }
-    debug!("Done waiting.");
-    // read from stdout
-    let output = String::from_utf8_lossy(&output.stdout).into_owned();
-    Ok(output)
 }
