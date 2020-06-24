@@ -1,17 +1,17 @@
 use std::process::{Command, Stdio};
 use std::io::Write;
 use log::*;
-use serde::Deserialize;
+use serde::{ Serialize, Deserialize};
 use anyhow::{Result, Error, Context};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Item {
     pub uuid: String,
     pub overview: Overview,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Overview {
     pub title: String,
@@ -27,20 +27,20 @@ pub fn get_items(token: &str) -> Result<Vec<Item>> {
     Ok(items)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Credential {
     pub uuid: String,
     pub details: Details,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Details {
     pub fields: Vec<Field>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Field {
     pub designation: String,

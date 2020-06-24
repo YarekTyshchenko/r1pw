@@ -34,24 +34,33 @@ fn main() -> Result<()>{
     debug!("Token: '{:?}'", token);
     // if cancelled, proceed
 
-    // @TODO: Implement caching here
-    let token = token.expect("Unable to proceed because cache isn't implemented");
-    let items = op::get_items(&token).map_err(|e| {
-        // Unable to get items, clearing token and exit
-        warn!("Clearing token");
-        cache::clear_token().unwrap();
-        e
-    }).with_context(||"Failed fetching item list from `op`")?;
+    // @TODO: There are two levels of cache. Item cache, and credential cache...
 
+    // Get items from cache
+    let items = cache::read_items()?;
     // @TODO: save previous item selection
     if let Some(selection) = select(&items, |item| format!("{}", item.overview.title))? {
-        let credential = op::get_credentials(selection, &token);
-        if let Some(field) = select(&credential.details.fields, |field|format_field(field))? {
-            // copy into paste buffer
-            debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
-            clipboard::copy_to_clipboard(&field.value);
+        if let Some(token) = &token {
+            let credential = op::get_credentials(selection, token);
+            if let Some(field) = select(&credential.details.fields, |field|format_field(field))? {
+                // copy into paste buffer
+                debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
+                clipboard::copy_to_clipboard(&field.value);
+            }
         }
     }
+
+    // Update cache
+    if let Some(token) = &token {
+        let items = op::get_items(token).map_err(|e| {
+            // Unable to get items, clearing token and exit
+            warn!("Clearing token");
+            cache::clear_token().unwrap();
+            e
+        }).with_context(||"Failed fetching item list from `op`")?;
+        cache::save_items(&items)?;
+    }
+
     // Everything is Ok
     Ok(())
 }

@@ -17,16 +17,17 @@ Done:
 - [x] Query single item for passwords
 - [x] Copy password value into clipboard
 - [x] Switch everything to use rust logger
+- [x] Handle all cancellations properly
+- [x] Break up program into sections/modules
+- [x] Cache item list in a simple file
 
 Stuff to do today:
 - [ ] Refactor program flow
-- [ ] Cache item list in a simple file
+- [ ] Cache actual credentials?
 
 Tomorrow:
 - [ ] Display previously selected item for quick access
-- [ ] Handle all cancellations properly
 - [ ] Calculate all totps by secret
-- [ ] Break up program into sections/modules
 - [ ] Find some libs for:
  - [ ] file cache for the token?
 
