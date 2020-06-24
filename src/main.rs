@@ -3,34 +3,26 @@ mod clipboard;
 mod op;
 mod dmenu;
 
-use op::{Field, OpError};
+use op::Field;
 
 use log::*;
 use itertools::Itertools;
-use anyhow::{Result, Error, Context};
+use anyhow::{Result, Context};
 
 fn obtain_token() -> Result<Option<String>> {
     if let Some(token) = cache::read_token()? {
         return Ok(Some(token))
     }
-    if let Some(token) = attempt_login()? {
-        cache::save_token(&token)?;
-        return Ok(Some(token));
-    }
-    Ok(None)
+    attempt_login()?
+        .map(|token|
+            cache::save_token(&token).map(|_|token)
+        ).transpose()
 }
 
-pub fn attempt_login() -> Result<Option<String>> {
-    if let Some(pw) = dmenu::prompt_hidden("Unlock:")? {
-        let token = op::login(&pw)
-            .map_err(|e| return match e {
-                OpError::CommandError(exit_status, text) =>
-                    Error::msg(format!("Command exited with code {:?}: {}", exit_status.code(), text)),
-                OpError::Io(e) => e.into(),
-            })?;
-        return Ok(Some(token))
-    }
-    Ok(None)
+fn attempt_login() -> Result<Option<String>> {
+    dmenu::prompt_hidden("Unlock:")?
+        .map(|pw| op::login(&pw))
+        .transpose()
 }
 
 // Main flow
@@ -46,9 +38,10 @@ fn main() -> Result<()>{
     let token = token.expect("Unable to proceed because cache isn't implemented");
     let items = op::get_items(&token).map_err(|e| {
         // Unable to get items, clearing token and exit
+        warn!("Clearing token");
         cache::clear_token().unwrap();
         e
-    }).unwrap();
+    }).with_context(||"Failed fetching item list from `op`")?;
 
     // @TODO: save previous item selection
     if let Some(selection) = select(&items, |item| format!("{}", item.overview.title))? {

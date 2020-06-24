@@ -1,8 +1,8 @@
-use std::process::{Command, Stdio, ExitStatus};
+use std::process::{Command, Stdio};
 use std::io::Write;
-use std::io;
 use log::*;
 use serde::Deserialize;
+use anyhow::{Result, Error, Context};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,10 +19,11 @@ pub struct Overview {
     pub tags: Option<Vec<String>>,
 }
 
-pub fn get_items(token: &str) -> Result<Vec<Item>, OpError> {
+pub fn get_items(token: &str) -> Result<Vec<Item>> {
     let items = op("", ["list", "items", "--session", token].to_vec())?;
     // Deserialisation issues should panic
-    let items: Vec<Item> = serde_json::from_str(&items).unwrap();
+    let items: Vec<Item> = serde_json::from_str(&items)
+        .with_context(||"Failed to de-serialise JSON item list")?;
     Ok(items)
 }
 
@@ -56,19 +57,13 @@ pub fn get_credentials(selection: &Item, token: &str) -> Credential {
     credential
 }
 
-pub fn login(unlock: &str) -> Result<String, OpError> {
+pub fn login(unlock: &str) -> Result<String> {
     let token = op(&format!("{}\n", unlock), ["signin", "--output=raw"].to_vec())?;
     let token = token.trim().to_owned();
     Ok(token)
 }
 
-#[derive(Debug)]
-pub enum OpError {
-    CommandError(ExitStatus, String),
-    Io(io::Error),
-}
-
-pub fn op(input: &str, args: Vec<&str>) -> Result<String, OpError> {
+pub fn op(input: &str, args: Vec<&str>) -> Result<String> {
     // Spawn signing, read out pipe for prompt
     let mut process = Command::new(
         "/usr/local/bin/op"
@@ -78,20 +73,22 @@ pub fn op(input: &str, args: Vec<&str>) -> Result<String, OpError> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn().map_err(OpError::Io)?;
+        .spawn()?;
     // Stdin must always exist
     let mut stdin = process.stdin.take().unwrap();
     // Feed to stdin of op
-    stdin.write_all(input.as_bytes()).map_err(OpError::Io)?;
+    stdin.write_all(input.as_bytes())?;
     drop(stdin);
     debug!("Waiting for process to finish");
-    let output = process.wait_with_output().map_err(OpError::Io)?;
+    let output = process.wait_with_output()?;
     if ! output.status.success() {
-        error!(
-            "op command failed with exit code {:?}: {}",
-            output.status.code(), String::from_utf8_lossy(&output.stderr).trim()
-        );
-        return Err(OpError::CommandError(output.status, "Foo".to_owned()));
+        return Err(Error::msg(format!(
+            "{}: {}",
+            match output.status.code() {
+                None => "op command terminated by signal".to_owned(),
+                Some(c) => format!("op command failed with exit code {}", c),
+            }, String::from_utf8_lossy(&output.stderr).trim())
+        ));
     }
     debug!("Done waiting.");
     // read from stdout
