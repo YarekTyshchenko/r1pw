@@ -3,11 +3,11 @@ mod clipboard;
 mod op;
 mod dmenu;
 
-use op::{Credential, Field, Item, OpError};
+use op::{Field, OpError};
 
 use log::*;
 use itertools::Itertools;
-use anyhow::{Result, Error};
+use anyhow::{Result, Error, Context};
 
 fn obtain_token() -> Result<Option<String>> {
     if let Some(token) = cache::read_token()? {
@@ -51,9 +51,9 @@ fn main() -> Result<()>{
     }).unwrap();
 
     // @TODO: save previous item selection
-    if let Some(selection) = display_item_selection(&items)? {
+    if let Some(selection) = select(&items, |item| format!("{}", item.overview.title))? {
         let credential = op::get_credentials(selection, &token);
-        if let Some(field) = display_credential_selection(&credential)? {
+        if let Some(field) = select(&credential.details.fields, |field|format_field(field))? {
             // copy into paste buffer
             debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
             clipboard::copy_to_clipboard(&field.value);
@@ -63,33 +63,19 @@ fn main() -> Result<()>{
     Ok(())
 }
 
-fn display_item_selection(items: &Vec<Item>) -> Result<Option<&Item>> {
-    // Feed list to dmenu on stdin
-    let input = items.iter()
-        .map(|item| item.overview.title.to_owned())
-        .join("\n");
-    // Find choice in list
-    Ok(
-        dmenu::select(&input)?
-            .map(|choice|
-                items.iter().find(|&i| i.overview.title == choice)
-            ).flatten()
-    )
-}
-
 fn format_field(field: &Field) -> String {
     format!("Designation: {}, Field name: {}, Value: {}", field.designation, field.name, field.value)
 }
 
-fn display_credential_selection(credential: &Credential) -> Result<Option<&Field>> {
-    let input = credential.details.fields.iter()
-        .map(|field| format_field(field))
+fn select<T>(items: &Vec<T>, format: fn(&T) -> String) -> Result<Option<&T>> {
+    let input = items.iter()
+        .map(|item| format(item))
         .join("\n");
 
-    Ok(
-        dmenu::select(&input)?
-            .map(|choice|
-                credential.details.fields.iter().find(|&f| format_field(f) == choice)
-            ).flatten()
-    )
+    let result = dmenu::select(&input)
+        .with_context(||"Error running dmenu")?
+        .map(|choice|
+            items.iter().find(|&i| format(i) == choice)
+        ).flatten();
+    Ok(result)
 }
