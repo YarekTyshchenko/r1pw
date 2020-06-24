@@ -64,8 +64,8 @@ pub fn login(unlock: &str) -> Result<String, OpError> {
 
 #[derive(Debug)]
 pub enum OpError {
-    Io(io::Error),
     CommandError(ExitStatus, String),
+    Io(io::Error),
 }
 
 pub fn op(input: &str, args: Vec<&str>) -> Result<String, OpError> {

@@ -4,30 +4,40 @@ mod op;
 mod dmenu;
 
 use op::{Credential, Field, Item, OpError};
-use dmenu::{DmenuError};
 
-use std::io;
 use log::*;
 use itertools::Itertools;
-use anyhow::Result;
+use anyhow::{Result, Error};
+
+fn obtain_token() -> Result<Option<String>> {
+    if let Some(token) = cache::read_token()? {
+        return Ok(Some(token))
+    }
+    if let Some(token) = attempt_login()? {
+        cache::save_token(&token)?;
+        return Ok(Some(token));
+    }
+    Ok(None)
+}
+
+pub fn attempt_login() -> Result<Option<String>> {
+    if let Some(pw) = dmenu::prompt_hidden("Unlock:")? {
+        let token = op::login(&pw)
+            .map_err(|e| return match e {
+                OpError::CommandError(exit_status, text) =>
+                    Error::msg(format!("Command exited with code {:?}: {}", exit_status.code(), text)),
+                OpError::Io(e) => e.into(),
+            })?;
+        return Ok(Some(token))
+    }
+    Ok(None)
+}
 
 // Main flow
 fn main() -> Result<()>{
     pretty_env_logger::init();
     // @TODO: show previous selected item, if set.
-    // check token exists
-    let token = cache::read_token_from_path()?
-        .or_else(|| {
-            let t = match attempt_login() {
-                Ok(t) => {
-                    cache::save_token(&t).expect("Unable to save new token");
-                    Some(t)
-                },
-                Err(LoginError::Cancelled()) => None,
-                Err(e) => panic!(e),
-            };
-            t
-        });
+    let token = obtain_token()?;
 
     debug!("Token: '{:?}'", token);
     // if cancelled, proceed
@@ -40,65 +50,46 @@ fn main() -> Result<()>{
         e
     }).unwrap();
 
-
-    let selection = display_item_selection(&items);
-    // save previous item selection
-
-    let credential = op::get_credentials(selection, &token);
-    let field = display_credential_selection(&credential);
-    // copy into paste buffer
-
-    debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
-    clipboard::copy_to_clipboard(&field.value);
+    // @TODO: save previous item selection
+    if let Some(selection) = display_item_selection(&items)? {
+        let credential = op::get_credentials(selection, &token);
+        if let Some(field) = display_credential_selection(&credential)? {
+            // copy into paste buffer
+            debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
+            clipboard::copy_to_clipboard(&field.value);
+        }
+    }
+    // Everything is Ok
     Ok(())
 }
 
-#[derive(Debug)]
-pub enum LoginError {
-    Cancelled(),
-    FailedDmenu(io::Error),
-    FailedOp(OpError),
-}
-
-pub fn attempt_login() -> Result<String, LoginError> {
-    let pw = match dmenu::prompt_hidden("Unlock:") {
-        Ok(pw) => Ok(pw),
-        Err(DmenuError::Cancelled()) => Err(LoginError::Cancelled()),
-        Err(DmenuError::Io(e)) => Err(LoginError::FailedDmenu(e)),
-    }.unwrap();
-    let token = op::login(&pw);
-    let token = match token {
-        Ok(t) => t,
-        Err(OpError::Io(e)) => panic!("IO Troubles: {}", e),
-        Err(OpError::CommandError(code, reason)) => panic!("Op exit code {} with error: {}", code, reason),
-    };
-    Ok(token)
-}
-
-fn display_item_selection(items: &Vec<Item>) -> &Item {
+fn display_item_selection(items: &Vec<Item>) -> Result<Option<&Item>> {
     // Feed list to dmenu on stdin
     let input = items.iter()
         .map(|item| item.overview.title.to_owned())
         .join("\n");
-    let choice = dmenu::select(&input);
     // Find choice in list
-    debug!("Choice: {}", choice);
-    // return item
-    let foo = items.iter().find(|&i| i.overview.title == choice).unwrap();
-    foo
+    Ok(
+        dmenu::select(&input)?
+            .map(|choice|
+                items.iter().find(|&i| i.overview.title == choice)
+            ).flatten()
+    )
 }
 
 fn format_field(field: &Field) -> String {
     format!("Designation: {}, Field name: {}, Value: {}", field.designation, field.name, field.value)
 }
 
-fn display_credential_selection(credential: &Credential) -> &Field {
+fn display_credential_selection(credential: &Credential) -> Result<Option<&Field>> {
     let input = credential.details.fields.iter()
         .map(|field| format_field(field))
         .join("\n");
-    let choice = dmenu::select(&input);
-    // find choice in list
-    let foo = credential.details.fields.iter().find(|&f| format_field(f) == choice).unwrap();
-    // return item
-    foo
+
+    Ok(
+        dmenu::select(&input)?
+            .map(|choice|
+                credential.details.fields.iter().find(|&f| format_field(f) == choice)
+            ).flatten()
+    )
 }

@@ -3,37 +3,31 @@ use std::io::Write;
 use std::io;
 use log::warn;
 
-pub fn select(input: &str) -> String {
-    dmenu(input, ["-b", "-l", "20"].to_vec()).unwrap()
+pub fn select(input: &str) -> io::Result<Option<String>> {
+    dmenu(input, ["-b", "-l", "20"].to_vec())
 }
 
-pub fn prompt_hidden(prompt: &str) -> Result<String, DmenuError> {
+pub fn prompt_hidden(prompt: &str) -> io::Result<Option<String>> {
     dmenu("", ["-b", "-p", prompt, "-nb", "black", "-nf", "black"].to_vec())
 }
 
-#[derive(Debug)]
-pub enum DmenuError {
-    Cancelled(),
-    Io(io::Error),
-}
-
-fn dmenu(input: &str, args: Vec<&str>) -> Result<String, DmenuError> {
+fn dmenu(input: &str, args: Vec<&str>) -> io::Result<Option<String>> {
     let mut dmenu = Command::new("dmenu")
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn().map_err(DmenuError::Io)?;
+        .spawn()?;
     let mut stdin = dmenu.stdin.take().unwrap();
-    stdin.write_all(input.as_bytes()).map_err(DmenuError::Io)?;
+    stdin.write_all(input.as_bytes())?;
     drop(stdin);
 
-    let output = dmenu.wait_with_output().map_err(DmenuError::Io)?;
+    let output = dmenu.wait_with_output()?;
     if !output.status.success() {
         warn!("Dmenu process cancelled with exit code {:?}", output.status.code());
-        return Err(DmenuError::Cancelled());
+        return Ok(None)
     }
     let choice = String::from_utf8_lossy(&output.stdout);
-    let choice = choice.trim();
-    Ok(choice.to_owned())
+    let choice = choice.trim().to_owned();
+    Ok(Some(choice))
 }
