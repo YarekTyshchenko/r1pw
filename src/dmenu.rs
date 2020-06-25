@@ -5,7 +5,7 @@ use log::warn;
 use anyhow::{Result, Context, Error};
 
 pub fn select<F: FnOnce() -> Result<()>>(input: &str, foo: F) -> io::Result<Option<String>> {
-    dmenu(input, ["-i", "-l", "20"].to_vec(), foo)
+    dmenu(input, ["-b", "-i", "-l", "20"].to_vec(), foo)
 }
 
 pub fn prompt_hidden(prompt: &str) -> io::Result<Option<String>> {
