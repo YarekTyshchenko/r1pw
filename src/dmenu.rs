@@ -2,16 +2,17 @@ use std::process::{Command, Stdio};
 use std::io::Write;
 use std::io;
 use log::warn;
+use anyhow::{Result, Context, Error};
 
-pub fn select(input: &str) -> io::Result<Option<String>> {
-    dmenu(input, ["-b", "-i", "-l", "20"].to_vec())
+pub fn select<F: FnOnce() -> Result<()>>(input: &str, foo: F) -> io::Result<Option<String>> {
+    dmenu(input, ["-i", "-l", "20"].to_vec(), foo)
 }
 
 pub fn prompt_hidden(prompt: &str) -> io::Result<Option<String>> {
-    dmenu("", ["-b", "-p", prompt, "-nb", "black", "-nf", "black"].to_vec())
+    dmenu("", ["-b", "-p", prompt, "-nb", "black", "-nf", "black"].to_vec(), ||Ok(()))
 }
 
-fn dmenu(input: &str, args: Vec<&str>) -> io::Result<Option<String>> {
+fn dmenu<F: FnOnce() -> Result<()>>(input: &str, args: Vec<&str>, foo: F) -> io::Result<Option<String>> {
     let mut dmenu = Command::new("dmenu")
         .args(args)
         .stdin(Stdio::piped())
@@ -23,6 +24,8 @@ fn dmenu(input: &str, args: Vec<&str>) -> io::Result<Option<String>> {
     drop(stdin);
 
     // Yield control here
+    foo().unwrap();
+
 
     let output = dmenu.wait_with_output()?;
     if !output.status.success() {

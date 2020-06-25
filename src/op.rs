@@ -71,7 +71,7 @@ pub fn op(input: &str, args: Vec<&str>) -> Result<String> {
         "/usr/local/bin/op"
         //"./mock.sh"
     );
-        process.args(args)
+    process.args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

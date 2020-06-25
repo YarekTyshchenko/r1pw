@@ -155,7 +155,7 @@ fn main() -> Result<()>{
     // @TODO: show previous selected item, if set.
     let (items, token) = get_items()?;
     // @TODO: save previous item selection
-    if let Some(selection) = select(&items, |item| format!("{}", item.overview.title))? {
+    if let Some(selection) = select(&items, |item| format!("{}", item.overview.title), ||Ok(()))? {
         // Display cached list if not empty
         // At the same time attempt to fetch selected item's real values
 
@@ -164,7 +164,7 @@ fn main() -> Result<()>{
         match &fields {
             Fields::Full(fields) => {
                 // If yes, return it
-                if let Some(field) = select(&fields, |field|format_field(field))? {
+                if let Some(field) = select(&fields, |field|format_field(field), ||Ok(()))? {
                     // copy into paste buffer
                     debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
                     clipboard::copy_to_clipboard(&field.value);
@@ -173,44 +173,49 @@ fn main() -> Result<()>{
             Fields::Redacted(field) => {
                 // If yes, return it
                 // Spawn another thread to lookup actual values
-                let a = match &token {
-                    Some(Token::Fresh(t)) | Some(Token::Stale(t)) => {
-                        op::get_credentials(selection, t)?
-                    },
-                    Some(Token::Refused()) => {
-                        unimplemented!()
-                    }
-                    None => {
-                        let token = obtain_token()?;
-                        match &token {
-                            Token::Refused() => {
-                                unimplemented!()
-                            },
-                            Token::Fresh(t) => {
-                                op::get_credentials(selection, t)?
-                            },
-                            Token::Stale(t) => {
-                                match op::get_credentials(selection, t) {
-                                    Ok(credential) => credential,
-                                    Err(e) => {
-                                        warn!("Error getting credential fields with stale token: {:?}", e);
-                                        let token_foo = attempt_login()?;
-                                        match token_foo {
-                                            None => unimplemented!(),
-                                            Some(new_token) => op::get_credentials(selection, &new_token)?,
-                                        }
-                                    },
-                                }
-                            },
-                        }
-                    },
-                };
                 let f = match &fields {
                     Fields::Full(f) | Fields::Redacted(f) => f
                 };
-                if let Some(field) = select(f, |field|format_field(field))? {
+                let mut a: Option<Credential> = None;
+                let query_fields_from_op = || -> Result<()>{
+                    debug!("Running something in the closure");
+                    a.replace(match &token {
+                        Some(Token::Fresh(t)) | Some(Token::Stale(t)) => {
+                            op::get_credentials(selection, t)?
+                        },
+                        Some(Token::Refused()) => {
+                            unimplemented!()
+                        }
+                        None => {
+                            let token = obtain_token()?;
+                            match &token {
+                                Token::Refused() => {
+                                    unimplemented!()
+                                },
+                                Token::Fresh(t) => {
+                                    op::get_credentials(selection, t)?
+                                },
+                                Token::Stale(t) => {
+                                    match op::get_credentials(selection, t) {
+                                        Ok(credential) => credential,
+                                        Err(e) => {
+                                            warn!("Error getting credential fields with stale token: {:?}", e);
+                                            let token_foo = attempt_login()?;
+                                            match token_foo {
+                                                None => unimplemented!(),
+                                                Some(new_token) => op::get_credentials(selection, &new_token)?,
+                                            }
+                                        },
+                                    }
+                                },
+                            }
+                        },
+                    });
+                    Ok(())
+                };
+                if let Some(field) = select(f, |field|format_field(field), query_fields_from_op)? {
                     // Wait for previous thread to finish
-                    // @TODO: This has severe race conditions with dmenu Login
+                    let a = a.unwrap();
                     let field = a.details.fields.iter().find(|&i|field.name == i.name)
                         .unwrap();
                     // copy into paste buffer
@@ -228,12 +233,12 @@ fn format_field(field: &Field) -> String {
     format!("Designation: {}, Field name: {}, Value: {}", field.designation, field.name, field.value)
 }
 
-fn select<T>(items: &Vec<T>, format: fn(&T) -> String) -> Result<Option<&T>> {
+fn select<T, F: FnOnce() -> Result<()>>(items: &Vec<T>, format: fn(&T) -> String, foo: F) -> Result<Option<&T>> {
     let input = items.iter()
         .map(|item| format(item))
         .join("\n");
 
-    let result = dmenu::select(&input)
+    let result = dmenu::select(&input, foo)
         .with_context(||"Error running dmenu")?
         .map(|choice|
             items.iter().find(|&i| format(i) == choice)
