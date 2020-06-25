@@ -38,6 +38,7 @@ pub struct Credential {
 #[serde(rename_all = "camelCase")]
 pub struct Details {
     pub fields: Vec<Field>,
+    // pub password: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -48,13 +49,14 @@ pub struct Field {
     pub value: String,
 }
 
-pub fn get_credentials(selection: &Item, token: &str) -> Credential {
+pub fn get_credentials(selection: &Item, token: &str) -> Result<Credential> {
     // Query op for title / uuid of the item
-    let output = op("", ["get", "item", &selection.uuid, "--session", token].to_vec()).unwrap();
+    let output = op("", ["get", "item", &selection.uuid, "--session", token].to_vec())?;
     //debug!("Creds: {}", output);
-    let credential: Credential = serde_json::from_str(&output).unwrap();
+    let credential: Credential = serde_json::from_str(&output)
+        .with_context(||format!("Error de-serialising Credential fields from JSON: {}", &output))?;
     // Optionally top up with totp
-    credential
+    Ok(credential)
 }
 
 pub fn login(unlock: &str) -> Result<String> {
@@ -68,12 +70,13 @@ pub fn op(input: &str, args: Vec<&str>) -> Result<String> {
     let mut process = Command::new(
         "/usr/local/bin/op"
         //"./mock.sh"
-    )
-        .args(args)
+    );
+        process.args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+    debug!("Command {:?}", process);
+    let mut process = process.spawn()?;
     // Stdin must always exist
     let mut stdin = process.stdin.take().unwrap();
     // Feed to stdin of op

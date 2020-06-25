@@ -23,7 +23,8 @@ Done:
 
 Stuff to do today:
 - [ ] Refactor program flow
-- [ ] Cache actual credentials?
+- [ ] Cache actual credentials (no, only fields)
+- [ ] Items with the same name
 
 Tomorrow:
 - [ ] Display previously selected item for quick access
@@ -34,3 +35,23 @@ Tomorrow:
 After:
 - [ ] Query for first totp
 - [ ] Support multiple accounts
+
+Multiple account support:
+- Read op config file, and display correct unlock message
+- Store account uuid / shorthand as part of the cache
+- List items with account prefix, authorise to the right place
+  when looking up credentials
+
+Program flows:
+
+Most common use:
+- invoke command without params
+- show list of cached items
+- select an item
+- show list of cached credentials (without passwords)
+- select credential (or press escape to view password values)
+- credential is copied into clipboard
+- exit
+
+
+

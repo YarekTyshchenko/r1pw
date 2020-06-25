@@ -4,7 +4,7 @@ use std::io;
 use log::warn;
 
 pub fn select(input: &str) -> io::Result<Option<String>> {
-    dmenu(input, ["-b", "-l", "20"].to_vec())
+    dmenu(input, ["-b", "-i", "-l", "20"].to_vec())
 }
 
 pub fn prompt_hidden(prompt: &str) -> io::Result<Option<String>> {
@@ -21,6 +21,8 @@ fn dmenu(input: &str, args: Vec<&str>) -> io::Result<Option<String>> {
     let mut stdin = dmenu.stdin.take().unwrap();
     stdin.write_all(input.as_bytes())?;
     drop(stdin);
+
+    // Yield control here
 
     let output = dmenu.wait_with_output()?;
     if !output.status.success() {
