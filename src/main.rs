@@ -9,25 +9,47 @@ use log::*;
 use itertools::Itertools;
 use anyhow::{Result, Context, Error};
 use crate::op::{Item, Credential};
+use std::borrow::Cow;
 
 enum Token {
-    Refused(),
     Stale(String),
     Fresh(String),
 }
 
-fn obtain_token() -> Result<Token> {
-    if let Some(token) = cache::read_token()? {
-        return Ok(Token::Stale(token))
+fn query_or_login<T, F: Fn(&str) -> Result<T>>(token: &mut Token, fun: F) -> Result<T> {
+    match &token {
+        Token::Fresh(t) => fun(t),
+        Token::Stale(t) => {
+            match fun(t) {
+                Ok(result) => {
+                    *token = Token::Fresh(t.into());
+                    Ok(result)
+                },
+                Err(e) => {
+                    warn!("Token is stale, requesting new one: {}", e);
+                    match attempt_login()? {
+                        None => Err(Error::msg("Login cancelled. Unable to proceed without token")),
+                        Some(t) => {
+                            let result = fun(&t);
+                            // New fresh token given
+                            *token = Token::Fresh(t);
+                            result
+                        }
+                    }
+                },
+            }
+        }
     }
-    info!("Attempting to get token from user");
-    match attempt_login()? {
-        None => Ok(Token::Refused()),
-        Some(token) => {
-            cache::save_token(&token)?;
-            Ok(Token::Fresh(token))
-        },
-    }
+}
+
+fn obtain_token() -> Result<Option<Token>> {
+    Ok(match cache::read_token()? {
+        Some(t) => Some(Token::Stale(t)),
+        None => match attempt_login()? {
+            None => None,
+            Some(t) => Some(Token::Fresh(t)),
+        }
+    })
 }
 
 fn attempt_login() -> Result<Option<String>> {
@@ -41,186 +63,119 @@ fn clear_token(e: Error) -> Error {
     cache::clear_token().unwrap();
     e
 }
-enum ActualToken {
-    Refused(),
-    NotNeeded(),
-    Here(String),
-}
-/// Get items from cache, also getting token if needed
-fn get_items() -> Result<(Vec<Item>, Option<Token>)> {
-    // Get from cache if possible
-    let items = cache::read_items()?;
-    if ! items.is_empty() {
-        debug!("Items found in cache: {}", items.len());
-        return Ok((items, None));
-    }
-
-    // We need the token to query for more, we have no choice
-    let token = obtain_token()?;
-    return match &token {
-        Token::Refused() => Ok((items, Some(token))),
-        // If its fresh, use it and report the error
-        Token::Fresh(t) => {
-            // Get items with it
-            let items = op::get_items(t)?;
-            cache::save_items(&items)?;
-            Ok((items, Some(token)))
-        },
-        // If its stale, attempt, and prompt for login on error
-        Token::Stale(t) => {
-            // Attempt to get items
-            match op::get_items(t) {
-                // If success, the token is still fresh
-                Ok(items) => {
-                    cache::save_items(&items)?;
-                    Ok((items, Some(Token::Fresh(t.into()))))
-                },
-                // On failure attempt to refresh the token
-                Err(e) => {
-                    warn!("Error getting items with stale token: {:?}", e);
-                    let token_foo = attempt_login()?;
-                    match token_foo {
-                        None => Ok((items, Some(Token::Refused()))),
-                        Some(new_token) => {
-                            let items = op::get_items(&new_token)?;
-                            cache::save_items(&items)?;
-                            Ok((items, Some(Token::Fresh(new_token))))
-                        },
-                    }
-                },
-            }
-        },
-    }
-}
 
 enum Fields {
     Redacted(Vec<Field>),
     Full(Vec<Field>),
 }
 
-fn get_credentials(item: &Item, token: Option<Token>) -> Result<(Fields, Option<Token>)> {
-    let fields = cache::read_credentials(&item.uuid)?;
-    if ! fields.is_empty() {
-        return Ok((Fields::Redacted(fields), None));
-    }
+/// Responsible for populating cache
+fn get_items(token: &str) -> Result<Vec<Item>> {
+    let items = op::get_items(token)?;
+    cache::save_items(&items)?;
+    Ok(items)
+}
 
-    // Its empty, we have no choice but to attempt to read them from Op with token
-    return match &token {
-        Some(Token::Fresh(t)) | Some(Token::Stale(t)) => {
-            let fields = op::get_credentials(item, t)?
-                .details.fields;
-            cache::write_credentials(&item.uuid, &fields)?;
-            Ok((Fields::Full(fields), token))
-        }
-        Some(Token::Refused()) => Ok((Fields::Redacted(fields), Some(Token::Refused()))),
-        None => {
-            let token = obtain_token()?;
-            match &token {
-                Token::Refused() => Ok((Fields::Redacted(fields), Some(Token::Refused()))),
-                Token::Fresh(t) => {
-                    let fields = op::get_credentials(item, t)?
-                        .details.fields;
-                    cache::write_credentials(&item.uuid, &fields)?;
-                    Ok((Fields::Full(fields), Some(token)))
-                },
-                Token::Stale(t) => {
-                    match op::get_credentials(item, t) {
-                        Ok(credential) => {
-                            cache::write_credentials(&item.uuid, &credential.details.fields)?;
-                            Ok((Fields::Full(credential.details.fields), Some(Token::Fresh(t.into()))))
-                        },
-                        Err(e) => {
-                            warn!("Error getting credential fields with stale token: {:?}", e);
-                            let token_foo = attempt_login()?;
-                            match token_foo {
-                                None => Ok((Fields::Redacted(fields), Some(Token::Refused()))),
-                                Some(new_token) => {
-                                    let fields = op::get_credentials(item, &new_token)?
-                                        .details.fields;
-                                    cache::write_credentials(&item.uuid, &fields)?;
-                                    Ok((Fields::Full(fields), Some(Token::Fresh(new_token))))
-                                },
-                            }
-                        },
-                    }
-                },
-            }
-        },
+fn get_fields(selection: &Item, token: &mut Token) -> Result<Fields> {
+    let fields = cache::read_credentials(&selection.uuid)?;
+    if ! fields.is_empty() {
+        return Ok(Fields::Redacted(fields));
     }
+    Ok(Fields::Full(query_or_login(token, |t| {
+        let fields = op::get_credentials(&selection, t)?
+            .details.fields;
+        cache::write_credentials(&selection.uuid, &fields)?;
+        Ok(fields)
+    })?))
+}
+
+fn noop() -> Result<()> {
+    Ok(())
 }
 
 // Main flow
 fn main() -> Result<()>{
     pretty_env_logger::init();
+    // If we don't have a token at all, get one, either stale, fresh, or see if user has aborted
+    let mut token = match obtain_token()? {
+        None => return Err(Error::msg("Unable to proceed without a token")),
+        Some(token) => token,
+    };
+
+    // Read items from cache, unless its empty
+    let mut items = cache::read_items()?;
+    if ! items.is_empty() {
+        debug!("Items found in cache: {}", items.len());
+    } else {
+        items = query_or_login(&mut token, get_items)?;
+    }
+    let items = items;
+
     // @TODO: show previous selected item, if set.
-    let (items, token) = get_items()?;
     // @TODO: save previous item selection
     if let Some(selection) = select(&items, |item| format!("{}", item.overview.title), ||Ok(()))? {
         // Display cached list if not empty
-        let (fields, token) = get_credentials(selection, token)?;
-        match &fields {
-            Fields::Full(fields) => {
-                if let Some(field) = select(&fields, |field|format_field(field), ||Ok(()))? {
-                    // copy into paste buffer
-                    debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
-                    clipboard::copy_to_clipboard(&field.value);
+        let fields = get_fields(&selection, &mut token)?;
+        let full_chosen_field = match fields {
+            Fields::Full(fields) =>
+                match select(&fields, |field| format_field(field), noop)? {
+                    None => unimplemented!(),
+                    Some(field) => {
+                        // copy into paste buffer
+                        debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
+                        clipboard::copy_to_clipboard(&field.value);
+                    },
                 }
-            },
+                    // .map(|f|Cow::Borrowed(&f)),
             Fields::Redacted(fields) => {
                 // At the same time attempt to fetch selected item's real values
-                let mut a: Option<(Credential, String)> = None;
-                let query_fields_from_op = || -> Result<()>{
+                let mut full_fields: Option<Vec<Field>> = None;
+                let query_full_fields = || -> Result<()>{
                     debug!("Running something in the closure");
-                    a.replace(match token {
-                        Some(Token::Fresh(t)) | Some(Token::Stale(t)) => {
-                            (op::get_credentials(selection, &t)?, t)
-                        },
-                        Some(Token::Refused()) => {
-                            return Err(Error::msg("Login cancelled by user, unable to proceed"))
-                        }
-                        None => {
-                            let token = obtain_token()?;
-                            match token {
-                                Token::Refused() => {
-                                    return Err(Error::msg("Login cancelled by user, unable to proceed"))
-                                },
-                                Token::Fresh(t) => {
-                                    (op::get_credentials(selection, &t)?, t)
-                                },
-                                Token::Stale(t) => {
-                                    match op::get_credentials(selection, &t) {
-                                        Ok(credential) => (credential, t),
-                                        Err(e) => {
-                                            warn!("Error getting credential fields with stale token: {:?}", e);
-                                            let token_foo = attempt_login()?;
-                                            match token_foo {
-                                                None => return Err(Error::msg("Login cancelled by user, unable to proceed")),
-                                                Some(new_token) => (op::get_credentials(selection, &new_token)?, new_token),
-                                            }
-                                        },
-                                    }
+                    full_fields.replace(query_or_login(&mut token, |t| {
+                        let fields = op::get_credentials(&selection, t)?
+                            .details.fields;
+                        cache::write_credentials(&selection.uuid, &fields)?;
+                        Ok(fields)
+                    })?);
+                    Ok(())
+                };
+                match select(&fields, |field| format_field(field), query_full_fields)? {
+                    None => return Err(Error::msg("User cancelled field choice")),
+                    Some(field) => match full_fields {
+                        None => return Err(Error::msg("Full fields were never fetched. Likely programming error")),
+                        Some(full_fields) => {
+                            // Match up selected field against all fields
+                            match full_fields.iter().find(|&i| field.name == i.name) {
+                                None => return Err(Error::msg("Selected field not found in full field list")),
+                                Some(field) => {
+                                    // Some(Cow::Owned(field))
+                                    // Unable to get Cow to work
+                                    // copy into paste buffer
+                                    debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
+                                    clipboard::copy_to_clipboard(&field.value);
                                 },
                             }
                         },
-                    });
-                    Ok(())
-                };
-                if let Some(field) = select(fields, |field|format_field(field), query_fields_from_op)? {
-                    // Wait for previous thread to finish
-                    let (a, token) = a.unwrap();
-                    let field = a.details.fields.iter().find(|&i|field.name == i.name)
-                        .unwrap();
-                    // copy into paste buffer
-                    debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
-                    clipboard::copy_to_clipboard(&field.value);
-                    // Update item cache on exit
-                    let items = op::get_items(&token)?;
-                    cache::save_items(&items)?;
+                    },
                 }
             },
-        }
+        };
+        // Would be location of the Cow field
+        // if let Some(field) = full_chosen_field {
+            // copy into paste buffer
+            // debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
+            // clipboard::copy_to_clipboard(&field.value);
+        // }
+
     }
     // Everything is Ok
+    if let Token::Fresh(token) = &token {
+        cache::save_token(token)?;
+        // Update item cache on exit
+        let items = op::get_items(&token)?;
+        cache::save_items(&items)?;
+    }
     Ok(())
 }
 
