@@ -117,16 +117,14 @@ fn main() -> Result<()>{
         // Display cached list if not empty
         let fields = get_fields(&selection, &mut token)?;
         let full_chosen_field = match fields {
-            Fields::Full(fields) =>
-                match select(&fields, |field| format_field(field), noop)? {
-                    None => unimplemented!(),
-                    Some(field) => {
-                        // copy into paste buffer
-                        debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
-                        clipboard::copy_to_clipboard(&field.value);
-                    },
-                }
-                    // .map(|f|Cow::Borrowed(&f)),
+            Fields::Full(fields) => {
+                let field = select(&fields, |field| format_field(field), noop)?
+                    .ok_or(Error::msg("User cancelled field choice"))?;
+                //let cow = Cow::Borrowed(field);
+                // copy into paste buffer
+                debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
+                clipboard::copy_to_clipboard(&field.value);
+            },
             Fields::Redacted(fields) => {
                 // At the same time attempt to fetch selected item's real values
                 let mut full_fields: Option<Vec<Field>> = None;
@@ -140,25 +138,18 @@ fn main() -> Result<()>{
                     })?);
                     Ok(())
                 };
-                match select(&fields, |field| format_field(field), query_full_fields)? {
-                    None => return Err(Error::msg("User cancelled field choice")),
-                    Some(field) => match full_fields {
-                        None => return Err(Error::msg("Full fields were never fetched. Likely programming error")),
-                        Some(full_fields) => {
-                            // Match up selected field against all fields
-                            match full_fields.iter().find(|&i| field.name == i.name) {
-                                None => return Err(Error::msg("Selected field not found in full field list")),
-                                Some(field) => {
-                                    // Some(Cow::Owned(field))
-                                    // Unable to get Cow to work
-                                    // copy into paste buffer
-                                    debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
-                                    clipboard::copy_to_clipboard(&field.value);
-                                },
-                            }
-                        },
-                    },
-                }
+                let selected_field = select(&fields, |field| format_field(field), query_full_fields)?
+                    .ok_or(Error::msg("User cancelled field choice"))?;
+                let field = full_fields
+                    .ok_or(Error::msg("Full fields were never fetched. Likely programming error"))?
+                    .into_iter().find(|i| selected_field.name == i.name)
+                    .ok_or(Error::msg("Selected field not found in full field list"))?;
+
+                //let cow = Cow::Owned(field);
+                // Unable to get Cow to work
+                // copy into paste buffer
+                debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
+                clipboard::copy_to_clipboard(&field.value);
             },
         };
         // Would be location of the Cow field
