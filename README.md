@@ -53,5 +53,7 @@ Most common use:
 - credential is copied into clipboard
 - exit
 
-
+Multi Account support:
+- Read Op config file, to fill in some of the accounts stuff
+- Ask for tokens to unlock all the accounts
 

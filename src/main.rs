@@ -157,53 +157,45 @@ fn main() -> Result<()>{
     // @TODO: save previous item selection
     if let Some(selection) = select(&items, |item| format!("{}", item.overview.title), ||Ok(()))? {
         // Display cached list if not empty
-        // At the same time attempt to fetch selected item's real values
-
         let (fields, token) = get_credentials(selection, token)?;
-        // Check if value is in item cache
         match &fields {
             Fields::Full(fields) => {
-                // If yes, return it
                 if let Some(field) = select(&fields, |field|format_field(field), ||Ok(()))? {
                     // copy into paste buffer
                     debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
                     clipboard::copy_to_clipboard(&field.value);
                 }
             },
-            Fields::Redacted(field) => {
-                // If yes, return it
-                // Spawn another thread to lookup actual values
-                let f = match &fields {
-                    Fields::Full(f) | Fields::Redacted(f) => f
-                };
-                let mut a: Option<Credential> = None;
+            Fields::Redacted(fields) => {
+                // At the same time attempt to fetch selected item's real values
+                let mut a: Option<(Credential, String)> = None;
                 let query_fields_from_op = || -> Result<()>{
                     debug!("Running something in the closure");
-                    a.replace(match &token {
+                    a.replace(match token {
                         Some(Token::Fresh(t)) | Some(Token::Stale(t)) => {
-                            op::get_credentials(selection, t)?
+                            (op::get_credentials(selection, &t)?, t)
                         },
                         Some(Token::Refused()) => {
-                            unimplemented!()
+                            return Err(Error::msg("Login cancelled by user, unable to proceed"))
                         }
                         None => {
                             let token = obtain_token()?;
-                            match &token {
+                            match token {
                                 Token::Refused() => {
-                                    unimplemented!()
+                                    return Err(Error::msg("Login cancelled by user, unable to proceed"))
                                 },
                                 Token::Fresh(t) => {
-                                    op::get_credentials(selection, t)?
+                                    (op::get_credentials(selection, &t)?, t)
                                 },
                                 Token::Stale(t) => {
-                                    match op::get_credentials(selection, t) {
-                                        Ok(credential) => credential,
+                                    match op::get_credentials(selection, &t) {
+                                        Ok(credential) => (credential, t),
                                         Err(e) => {
                                             warn!("Error getting credential fields with stale token: {:?}", e);
                                             let token_foo = attempt_login()?;
                                             match token_foo {
-                                                None => unimplemented!(),
-                                                Some(new_token) => op::get_credentials(selection, &new_token)?,
+                                                None => return Err(Error::msg("Login cancelled by user, unable to proceed")),
+                                                Some(new_token) => (op::get_credentials(selection, &new_token)?, new_token),
                                             }
                                         },
                                     }
@@ -213,14 +205,17 @@ fn main() -> Result<()>{
                     });
                     Ok(())
                 };
-                if let Some(field) = select(f, |field|format_field(field), query_fields_from_op)? {
+                if let Some(field) = select(fields, |field|format_field(field), query_fields_from_op)? {
                     // Wait for previous thread to finish
-                    let a = a.unwrap();
+                    let (a, token) = a.unwrap();
                     let field = a.details.fields.iter().find(|&i|field.name == i.name)
                         .unwrap();
                     // copy into paste buffer
                     debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
                     clipboard::copy_to_clipboard(&field.value);
+                    // Update item cache on exit
+                    let items = op::get_items(&token)?;
+                    cache::save_items(&items)?;
                 }
             },
         }

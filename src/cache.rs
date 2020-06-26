@@ -36,7 +36,7 @@ pub fn read_token() -> Result<Option<String>> {
     let token_path = get_token_path()?;
     // Error opening file
     match std::fs::read_to_string(&token_path) {
-        Ok(s) => Ok(Some(s)),
+        Ok(s) => Ok(Some(s.trim().into())),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e),
     }.with_context(|| format!("Error opening file {:?}", token_path))
@@ -111,4 +111,32 @@ pub fn write_credentials(key: &str, fields: &Vec<Field>) -> Result<()> {
         .with_context(||"Error serialising fields to cache")?;
     std::fs::write(get_field_cache_path(key)?, a)
         .with_context(||"Error writing field cache")
+}
+
+// Model
+struct Cache {
+    accounts: Vec<Account>,
+}
+
+type Token = String;
+
+struct Account {
+    token: Option<Token>,
+    shorthand: String,
+    uuid: String,
+    items: Vec<Item2>
+}
+
+struct Item2 {
+    uuid: String,
+    name: String,
+    url: String,
+    fields: Vec<Field2>,
+    tags: Vec<String>,
+}
+
+struct Field2 {
+    name: String,
+    designation: String,
+    value: String,
 }
