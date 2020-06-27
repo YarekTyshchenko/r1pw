@@ -20,10 +20,12 @@ Done:
 - [x] Handle all cancellations properly
 - [x] Break up program into sections/modules
 - [x] Cache item list in a simple file
+- [x] Refactor program flow
+- [x] Cache actual credentials (no, only fields)
 
 Stuff to do today:
-- [ ] Refactor program flow
-- [ ] Cache actual credentials (no, only fields)
+- [ ] Read and parse OP config file, to populate Accounts
+- [ ] Support multiple accounts
 - [ ] Items with the same name
 
 Tomorrow:
@@ -34,7 +36,6 @@ Tomorrow:
 
 After:
 - [ ] Query for first totp
-- [ ] Support multiple accounts
 
 Multiple account support:
 - Read op config file, and display correct unlock message
