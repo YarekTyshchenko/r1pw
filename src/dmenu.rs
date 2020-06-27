@@ -2,7 +2,7 @@ use std::process::{Command, Stdio};
 use std::io::Write;
 use std::io;
 use log::warn;
-use anyhow::{Result, Context, Error};
+use anyhow::Result;
 
 pub fn select<F: FnOnce() -> Result<()>>(input: &str, foo: F) -> io::Result<Option<String>> {
     dmenu(input, ["-b", "-i", "-l", "20"].to_vec(), foo)

@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::io::{ErrorKind, Error};
+use std::io::ErrorKind;
 
 use super::op::{Item};
-use crate::op::{Credential, Field};
+use crate::op::Field;
 use itertools::Itertools;
 
 const TOKEN_PATH: &str = "~/.config/1pw/token";
@@ -50,12 +50,6 @@ pub fn save_token(token: &str) -> Result<()> {
     }
     std::fs::write(&token_path, token)
         .with_context(||format!("Error writing token to path {:?}", token_path))
-}
-
-pub fn clear_token() -> Result<()> {
-    let token_path = get_token_path()?;
-    std::fs::remove_file(&token_path)
-        .with_context(||format!("Error clearing token {:?}", token_path))
 }
 
 pub fn save_items(items: &Vec<Item>) -> Result<()> {
@@ -111,32 +105,4 @@ pub fn write_credentials(key: &str, fields: &Vec<Field>) -> Result<()> {
         .with_context(||"Error serialising fields to cache")?;
     std::fs::write(get_field_cache_path(key)?, a)
         .with_context(||"Error writing field cache")
-}
-
-// Model
-struct Cache {
-    accounts: Vec<Account>,
-}
-
-type Token = String;
-
-struct Account {
-    token: Option<Token>,
-    shorthand: String,
-    uuid: String,
-    items: Vec<Item2>
-}
-
-struct Item2 {
-    uuid: String,
-    name: String,
-    url: String,
-    fields: Vec<Field2>,
-    tags: Vec<String>,
-}
-
-struct Field2 {
-    name: String,
-    designation: String,
-    value: String,
 }

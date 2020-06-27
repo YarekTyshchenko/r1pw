@@ -3,13 +3,11 @@ mod clipboard;
 mod op;
 mod dmenu;
 
-use op::Field;
+use op::{Field, Item};
 
 use log::*;
 use itertools::Itertools;
 use anyhow::{Result, Context, Error};
-use crate::op::{Item, Credential};
-use std::borrow::Cow;
 
 enum Token {
     Stale(String),
@@ -58,12 +56,6 @@ fn attempt_login() -> Result<Option<String>> {
         .transpose()
 }
 
-fn clear_token(e: Error) -> Error {
-    warn!("Clearing token");
-    cache::clear_token().unwrap();
-    e
-}
-
 enum Fields {
     Redacted(Vec<Field>),
     Full(Vec<Field>),
@@ -93,6 +85,11 @@ fn noop() -> Result<()> {
     Ok(())
 }
 
+fn copy_to_clipboard(field: &Field) {
+    debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
+    clipboard::copy_to_clipboard(&field.value);
+}
+
 // Main flow
 fn main() -> Result<()>{
     pretty_env_logger::init();
@@ -116,14 +113,11 @@ fn main() -> Result<()>{
     if let Some(selection) = select(&items, |item| format!("{}", item.overview.title), ||Ok(()))? {
         // Display cached list if not empty
         let fields = get_fields(&selection, &mut token)?;
-        let full_chosen_field = match fields {
+        match fields {
             Fields::Full(fields) => {
                 let field = select(&fields, |field| format_field(field), noop)?
                     .ok_or(Error::msg("User cancelled field choice"))?;
-                //let cow = Cow::Borrowed(field);
-                // copy into paste buffer
-                debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
-                clipboard::copy_to_clipboard(&field.value);
+                copy_to_clipboard(field);
             },
             Fields::Redacted(fields) => {
                 // At the same time attempt to fetch selected item's real values
@@ -145,20 +139,9 @@ fn main() -> Result<()>{
                     .into_iter().find(|i| selected_field.name == i.name)
                     .ok_or(Error::msg("Selected field not found in full field list"))?;
 
-                //let cow = Cow::Owned(field);
-                // Unable to get Cow to work
-                // copy into paste buffer
-                debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
-                clipboard::copy_to_clipboard(&field.value);
+                copy_to_clipboard(&field);
             },
         };
-        // Would be location of the Cow field
-        // if let Some(field) = full_chosen_field {
-            // copy into paste buffer
-            // debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
-            // clipboard::copy_to_clipboard(&field.value);
-        // }
-
     }
     // Everything is Ok
     if let Token::Fresh(token) = &token {
