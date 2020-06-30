@@ -18,7 +18,7 @@ fn login_prompt(account: &Account) -> String {
     format!("Unlock for {} ({}):", account.shorthand, account.email)
 }
 
-fn query_or_login<T, F: Fn(&str) -> Result<T>>(prompt: &str, token: &mut Token, fun: F) -> Result<T> {
+fn query_or_login<T, F: Fn(&str) -> Result<T>>(shorthand: &str, prompt: &str, token: &mut Token, fun: F) -> Result<T> {
     match &token {
         Token::Fresh(t) => fun(t),
         Token::Stale(t) => {
@@ -29,7 +29,7 @@ fn query_or_login<T, F: Fn(&str) -> Result<T>>(prompt: &str, token: &mut Token, 
                 },
                 Err(e) => {
                     warn!("Token is stale, requesting new one: {}", e);
-                    match attempt_login(prompt)? {
+                    match attempt_login(shorthand, prompt)? {
                         None => Err(Error::msg("Login cancelled. Unable to proceed without token")),
                         Some(t) => {
                             let result = fun(&t);
@@ -48,47 +48,27 @@ fn query_or_login<T, F: Fn(&str) -> Result<T>>(prompt: &str, token: &mut Token, 
 fn obtain_token(account: &storage::Account) -> Result<Option<Token>> {
     Ok(match &account.token {
         Some(t) => Some(Token::Stale(t.into())),
-        None => match attempt_login(&format!("Unlock for {} ({}):", account.shorthand, account.email))? {
+        None => match attempt_login(&account.shorthand, &format!("Unlock for {} ({}):", account.shorthand, account.email))? {
             None => None,
             Some(t) => Some(Token::Fresh(t)),
         }
     })
 }
 
-fn attempt_login(prompt: &str) -> Result<Option<String>> {
+fn attempt_login(shorthand: &str, prompt: &str) -> Result<Option<String>> {
     dmenu::prompt_hidden(prompt)?
-        .map(|pw| op::login(&pw))
+        .map(|pw| op::login(shorthand, &pw))
         .transpose()
 }
-
-/// Responsible for populating cache
-fn get_items(token: &str) -> Result<Vec<Item>> {
-    let items = op::get_items(token)?;
-    cache::save_items(&items)?;
-    Ok(items)
-}
-
-// fn get_fields(selection: &Item, token: &mut Token) -> Result<Fields> {
-//     let fields = cache::read_credentials(&selection.uuid)?;
-//     if ! fields.is_empty() {
-//         return Ok(Fields::Redacted(fields));
-//     }
-//     Ok(Fields::Full(query_or_login(token, |t| {
-//         let fields = op::get_credentials(&selection, t)?
-//             .details.fields;
-//         cache::write_credentials(&selection.uuid, &fields)?;
-//         Ok(fields)
-//     })?))
-// }
 
 fn noop() -> Result<()> {
     Ok(())
 }
 
-// fn copy_to_clipboard(field: &Field) {
-//     debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
-//     clipboard::copy_to_clipboard(&field.value);
-// }
+fn copy_to_clipboard(field: &logical::FullField) {
+    debug!("Chosen field is: {}, {}, {}", field.name, field.designation, field.value);
+    clipboard::copy_to_clipboard(&field.value);
+}
 
 // Main flow
 fn main() -> Result<()>{
@@ -99,7 +79,7 @@ fn main() -> Result<()>{
         return Err(Error::msg("No accounts found"))
     }
 
-
+    // Convert cached accounts into a vec of mutable accounts, with tokens
     let mut accounts: Vec<logical::Account> = cache.accounts
         .iter()
         .map(|account| {
@@ -118,14 +98,19 @@ fn main() -> Result<()>{
             }
         })
         .collect::<Result<Vec<logical::Account>>>()?;
+    debug!("{:?}", accounts);
 
     // Compute items from all the accounts, querying for real items where they are empty
-    let items: Vec<logical::Item> = cache.accounts
+    let items = cache.accounts
         .into_iter()
         .enumerate()
         .map(|(index, account)| {
-            let items: Vec<logical::Item> = account.items.into_iter().map(move |item| logical::Item {
-                account: index,
+            // Borrow mutable to update the token
+            let a = accounts.get_mut(index).unwrap();
+            debug!("Fetching items for account {}={}, Token: {:?}", account.shorthand, a.shorthand, a.token);
+            let items: Vec<logical::Item> = account.items.into_iter().map(|item| logical::Item {
+                account_name: (&a.shorthand).clone(),
+                account_index: index,
                 uuid: item.uuid.clone(),
                 name: item.name.clone(),
                 url: item.url.to_owned(),
@@ -134,120 +119,86 @@ fn main() -> Result<()>{
                     name: field.name.clone(),
                     designation: field.designation.clone(),
                     value_length: field.value_length,
-                }).collect()),
-            }).collect();
-            return items;
-
-
-            // @TODO: Deal with this unwrap somehow
-            // let a = accounts.get_mut(index).unwrap();
-            // let op_items = query_or_login(&login_prompt(a), &mut a.token, op::get_items)?;
-            // let items = op_items.into_iter().map(move |item| logical::Item {
-            //     account: index,
-            //     uuid: item.uuid,
-            //     name: item.overview.title,
-            //     url: item.overview.url,
-            //     tags: item.overview.tags.into_iter().flatten().collect_vec(),
-            //     fields: logical::Fields::Missing(),
-            // }).collect();
-            //return Ok(items.into_iter());
+                }).collect::<Vec<_>>()),
+            }).collect::<Vec<_>>();
+            if items.is_empty() {
+                // @TODO: Deal with this unwrap somehow
+                let account_shorthand = &a.shorthand;
+                let op_items = query_or_login(account_shorthand, &login_prompt(a), &mut a.token, |t|op::get_items(account_shorthand, t))?;
+                let items = op_items.into_iter().map(|item| logical::Item {
+                    account_name: account_shorthand.clone(),
+                    account_index: index,
+                    uuid: item.uuid,
+                    name: item.overview.title,
+                    url: item.overview.url,
+                    tags: item.overview.tags.into_iter().flatten().collect_vec(),
+                    fields: logical::Fields::Missing(),
+                }).collect::<Vec<_>>();
+                return Ok(items);
+            }
+            return Ok(items);
         })
-        .collect();
+        .collect::<Result<Vec<_>>>();
 
-    // let items = items.into_iter()
-    //     .collect::<Vec<_>>();
-
-    // if items.is_empty() {
-    //     // go through each account, and populate items
-    // }
-    // let mut accounts: Vec<logical::Account> = Vec::new();
-    // let mut items: Vec<logical::Item> = Vec::new();
-    // for account in cache.accounts {
-    //     let logical_account = Account {
-    //         token: Token::Stale("".to_owned()), // @TODO: Get real token
-    //         shorthand: account.shorthand,
-    //         email: account.email,
-    //         uuid: account.uuid,
-    //     };
-    //     items.push(logical::Item {
-    //         account: Box::new(&logical_account),
-    //         uuid: "".to_string(),
-    //         name: "".to_string(),
-    //         url: "".to_string(),
-    //         tags: vec![],
-    //         fields: vec![]
-    //     });
-    //     accounts.push(logical_account);
-    // }
-
-    // let mut tokens = HashMap::<String, Token>::new();
-    // for account in &mut cache.accounts {
-    //     if let Some(token) = obtain_token(account)? {
-    //         // Only relevant if the token is fresh...
-    //         account.token.replace((&token).into());
-    //         tokens.insert((&account.uuid).into(), token);
-    //     }
-    //
-    //     debug!("Items found in cache: {}", account.items.len());
-    //     if account.items.is_empty() {
-    //         let items = query_or_login(&account, tokens.get_mut((&account.uuid).into()).unwrap(), get_items)?;
-    //         account.items = items.into_iter().map(|i|model::Item {
-    //             uuid: i.uuid,
-    //             name: i.overview.title,
-    //             url: i.overview.url,
-    //             fields: vec![],
-    //             tags: i.overview.tags.unwrap_or(vec![])
-    //         }).collect();
-    //     }
-    //
-    // }
-    debug!("{:?}", accounts);
+    let items: Vec<logical::Item> = items?.into_iter().flat_map(|a|a)
+        .collect::<Vec<_>>();
     debug!("{:?}", items);
-    // // Read items from cache, unless its empty
-    // let mut items = cache::read_items()?;
-    // if ! items.is_empty() {
-    //     debug!("Items found in cache: {}", items.len());
-    // } else {
-    //     items = query_or_login(&mut token, get_items)?;
-    // }
-    // let items = items;
-    //
-    // // @TODO: show previous selected item, if set.
-    // // @TODO: save previous item selection
-    // if let Some(selection) = select(&items, |item| format!("{}", item.overview.title), ||Ok(()))? {
-    //     // Display cached list if not empty
-    //     let fields = get_fields(&selection, &mut token)?;
-    //     match fields {
-    //         Fields::Full(fields) => {
-    //             let field = select(&fields, |field| format_field(field), noop)?
-    //                 .ok_or(Error::msg("User cancelled field choice"))?;
-    //             copy_to_clipboard(field);
-    //         },
-    //         Fields::Redacted(fields) => {
-    //             // At the same time attempt to fetch selected item's real values
-    //             let mut full_fields: Option<Vec<Field>> = None;
-    //             let query_full_fields = || -> Result<()>{
-    //                 debug!("Running something in the closure");
-    //                 full_fields.replace(query_or_login(&mut token, |t| {
-    //                     let fields = op::get_credentials(&selection, t)?
-    //                         .details.fields;
-    //                     cache::write_credentials(&selection.uuid, &fields)?;
-    //                     Ok(fields)
-    //                 })?);
-    //                 Ok(())
-    //             };
-    //             let selected_field = select(&fields, |field| format_field(field), query_full_fields)?
-    //                 .ok_or(Error::msg("User cancelled field choice"))?;
-    //             let field = full_fields
-    //                 .ok_or(Error::msg("Full fields were never fetched. Likely programming error"))?
-    //                 .into_iter().find(|i| selected_field.name == i.name)
-    //                 .ok_or(Error::msg("Selected field not found in full field list"))?;
-    //
-    //             copy_to_clipboard(&field);
-    //         },
-    //     };
-    // }
-    // // Everything is Ok
+
+    // @TODO: show previous selected item, if set.
+    // @TODO: save previous item selection
+    if let Some(selection) = select(&items, |item| {
+        return format!("{}: {}", item.account_name, item.name)
+    }, noop)? {
+        // Display cached list if not empty
+        debug!("{:?}", selection.fields);
+        let a = accounts.get_mut(selection.account_index).unwrap();
+        match &selection.fields {
+            // Simply fetch them from remote and display
+            Fields::Missing() => {
+                let fields = query_or_login(&a.shorthand, &login_prompt(a), &mut a.token, |t|op::get_credentials(&selection.uuid, t))?;
+                debug!("{:?}", fields);
+                // Convert to actual fields
+                let fields: Vec<logical::FullField> = fields.details.fields.into_iter().map(|f| logical::FullField {
+                    name: f.name,
+                    designation: f.designation,
+                    value: f.value
+                })
+                    .collect::<Vec<_>>();
+                let field = select(&fields, |field| format_field(field), noop)?
+                    .ok_or(Error::msg("User cancelled field choice"))?;
+                copy_to_clipboard(field);
+            },
+            Fields::Redacted(fields) => {
+                // At the same time attempt to fetch selected item's real values
+                let mut full_fields: Option<Vec<logical::FullField>> = None;
+                let query_full_fields = || -> Result<()>{
+                    debug!("Running something in the closure");
+                    full_fields.replace(query_or_login(
+                        &a.shorthand, &login_prompt(a), &mut a.token, |t| {
+                        let fields = op::get_credentials(&selection.uuid, t)?
+                            .details.fields.into_iter().map(|f| logical::FullField {
+                            name: f.name,
+                            designation: f.designation,
+                            value: f.value,
+                        })
+                            .collect::<Vec<_>>();
+                        Ok(fields)
+                    })?);
+                    Ok(())
+                };
+                let selected_field = select(&fields, |field| format_redacted_field(field), query_full_fields)?
+                    .ok_or(Error::msg("User cancelled field choice"))?;
+                let field = full_fields
+                    .ok_or(Error::msg("Full fields were never fetched. Likely programming error"))?
+                    .into_iter().find(|i| selected_field.name == i.name)
+                    .ok_or(Error::msg("Selected field not found in full field list"))?;
+
+                copy_to_clipboard(&field);
+            },
+        }
+    }
+    // Save cache
+    // Everything is Ok
     // if let Token::Fresh(token) = &token {
     //     cache::save_token(token)?;
     //     // Update item cache on exit
@@ -257,11 +208,15 @@ fn main() -> Result<()>{
     Ok(())
 }
 
-fn format_field(field: &Field) -> String {
+fn format_field(field: &logical::FullField) -> String {
     format!("Designation: {}, Field name: {}, Value: {}", field.designation, field.name, field.value)
 }
 
-fn select<T, F: FnOnce() -> Result<()>>(items: &Vec<T>, format: fn(&T) -> String, foo: F) -> Result<Option<&T>> {
+fn format_redacted_field(field: &logical::RedactedField) -> String {
+    format!("Designation: {}, Field name: {}, Value: {}", field.designation, field.name, field.value_length)
+}
+
+fn select<T, H: Fn(&T) -> String, F: FnOnce() -> Result<()>>(items: &Vec<T>, format: H, foo: F) -> Result<Option<&T>> {
     let input = items.iter()
         .map(|item| format(item))
         .join("\n");

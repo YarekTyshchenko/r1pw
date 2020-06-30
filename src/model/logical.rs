@@ -6,7 +6,6 @@ pub struct Cache {
 #[derive(Debug)]
 pub enum Fields {
     Redacted(Vec<RedactedField>),
-    Full(Vec<FullField>),
     Missing(),
 }
 
@@ -27,7 +26,8 @@ pub struct RedactedField {
 
 #[derive(Debug)]
 pub struct Item {
-    pub account: usize,
+    pub account_name: String,
+    pub account_index: usize,
     pub uuid: String,
     pub name: String,
     pub url: Option<String>,

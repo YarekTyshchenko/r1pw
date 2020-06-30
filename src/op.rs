@@ -19,8 +19,8 @@ pub struct Overview {
     pub tags: Option<Vec<String>>,
 }
 
-pub fn get_items(token: &str) -> Result<Vec<Item>> {
-    let items = op("", ["list", "items", "--session", token].to_vec())?;
+pub fn get_items(account_uuid: &str, token: &str) -> Result<Vec<Item>> {
+    let items = op("", vec!["list", "items", "--account", account_uuid, "--session", token])?;
     // Deserialisation issues should panic
     let items: Vec<Item> = serde_json::from_str(&items)
         .with_context(||"Failed to de-serialise JSON item list")?;
@@ -49,9 +49,9 @@ pub struct Field {
     pub value: String,
 }
 
-pub fn get_credentials(selection: &Item, token: &str) -> Result<Credential> {
+pub fn get_credentials(item_uuid: &str, token: &str) -> Result<Credential> {
     // Query op for title / uuid of the item
-    let output = op("", ["get", "item", &selection.uuid, "--session", token].to_vec())?;
+    let output = op("", ["get", "item", &item_uuid, "--session", token].to_vec())?;
     //debug!("Creds: {}", output);
     let credential: Credential = serde_json::from_str(&output)
         .with_context(||format!("Error de-serialising Credential fields from JSON: {}", &output))?;
@@ -59,8 +59,8 @@ pub fn get_credentials(selection: &Item, token: &str) -> Result<Credential> {
     Ok(credential)
 }
 
-pub fn login(unlock: &str) -> Result<String> {
-    let token = op(&format!("{}\n", unlock), ["signin", "--output=raw"].to_vec())?;
+pub fn login(shorthand: &str, unlock: &str) -> Result<String> {
+    let token = op(&format!("{}\n", unlock), vec!["signin", shorthand, "--output=raw"])?;
     let token = token.trim().to_owned();
     Ok(token)
 }
