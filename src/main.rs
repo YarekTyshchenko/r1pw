@@ -98,7 +98,6 @@ fn main() -> Result<()>{
             }
         })
         .collect::<Result<Vec<logical::Account>>>()?;
-    debug!("{:?}", accounts);
 
     // Compute items from all the accounts, querying for real items where they are empty
     let items = cache.accounts
@@ -108,18 +107,26 @@ fn main() -> Result<()>{
             // Borrow mutable to update the token
             let a = accounts.get_mut(index).unwrap();
             debug!("Fetching items for account {}={}, Token: {:?}", account.shorthand, a.shorthand, a.token);
-            let items: Vec<logical::Item> = account.items.into_iter().map(|item| logical::Item {
-                account_name: (&a.shorthand).clone(),
-                account_index: index,
-                uuid: item.uuid.clone(),
-                name: item.name.clone(),
-                url: item.url.to_owned(),
-                tags: item.tags.clone(),
-                fields: logical::Fields::Redacted(item.fields.into_iter().map(move |field| logical::RedactedField {
+            let items: Vec<logical::Item> = account.items.into_iter().map(|item| {
+                let item_fields = item.fields.into_iter().map(move |field| logical::RedactedField {
                     name: field.name.clone(),
                     designation: field.designation.clone(),
                     value_length: field.value_length,
-                }).collect::<Vec<_>>()),
+                }).collect::<Vec<_>>();
+
+                logical::Item {
+                    account_name: (&a.shorthand).clone(),
+                    account_index: index,
+                    uuid: item.uuid.clone(),
+                    name: item.name.clone(),
+                    url: item.url.to_owned(),
+                    tags: item.tags.clone(),
+                    fields: if ! item_fields.is_empty() {
+                        logical::Fields::Redacted(item_fields)
+                    } else {
+                        logical::Fields::Missing()
+                    },
+                }
             }).collect::<Vec<_>>();
             if items.is_empty() {
                 // @TODO: Deal with this unwrap somehow
@@ -142,7 +149,6 @@ fn main() -> Result<()>{
 
     let items: Vec<logical::Item> = items?.into_iter().flat_map(|a|a)
         .collect::<Vec<_>>();
-    debug!("{:?}", items);
 
     // @TODO: show previous selected item, if set.
     // @TODO: save previous item selection
@@ -150,13 +156,11 @@ fn main() -> Result<()>{
         return format!("{}: {}", item.account_name, item.name)
     }, noop)? {
         // Display cached list if not empty
-        debug!("{:?}", selection.fields);
         let a = accounts.get_mut(selection.account_index).unwrap();
         match &selection.fields {
             // Simply fetch them from remote and display
             Fields::Missing() => {
                 let fields = query_or_login(&a.shorthand, &login_prompt(a), &mut a.token, |t|op::get_credentials(&selection.uuid, t))?;
-                debug!("{:?}", fields);
                 // Convert to actual fields
                 let fields: Vec<logical::FullField> = fields.details.fields.into_iter().map(|f| logical::FullField {
                     name: f.name,
@@ -167,6 +171,7 @@ fn main() -> Result<()>{
                 let field = select(&fields, |field| format_field(field), noop)?
                     .ok_or(Error::msg("User cancelled field choice"))?;
                 copy_to_clipboard(field);
+                convert_cache(&accounts, &items, selection, &fields)?;
             },
             Fields::Redacted(fields) => {
                 // At the same time attempt to fetch selected item's real values
@@ -188,24 +193,71 @@ fn main() -> Result<()>{
                 };
                 let selected_field = select(&fields, |field| format_redacted_field(field), query_full_fields)?
                     .ok_or(Error::msg("User cancelled field choice"))?;
-                let field = full_fields
-                    .ok_or(Error::msg("Full fields were never fetched. Likely programming error"))?
-                    .into_iter().find(|i| selected_field.name == i.name)
-                    .ok_or(Error::msg("Selected field not found in full field list"))?;
+                let full_fields = full_fields
+                    .ok_or(Error::msg("Full fields were never fetched. Likely programming error"))?;
 
-                copy_to_clipboard(&field);
+                    let field = full_fields.iter()
+                        .find(|i| selected_field.name == i.name)
+                        .ok_or(Error::msg("Selected field not found in full field list"))?;
+
+                copy_to_clipboard(field);
+                convert_cache(&accounts, &items, selection, &full_fields)?;
             },
         }
     }
-    // Save cache
     // Everything is Ok
-    // if let Token::Fresh(token) = &token {
-    //     cache::save_token(token)?;
-    //     // Update item cache on exit
-    //     let items = op::get_items(&token)?;
-    //     cache::save_items(&items)?;
-    // }
     Ok(())
+}
+
+fn convert_cache(accounts: &Vec<logical::Account>, items: &Vec<logical::Item>, selected_item: &logical::Item, new_fields: &Vec<logical::FullField>) -> Result<()> {
+    let accounts = accounts.iter().enumerate().map(|(index, a)| {
+        let account_items = items.iter()
+            .filter(|&i| i.account_index == index)
+            .map(|i| {
+                let mut item_fields = match &i.fields {
+                    Fields::Redacted(fields) =>
+                        fields.iter().map(|f| storage::Field {
+                            name: f.name.clone(),
+                            designation: f.designation.clone(),
+                            value_length: f.value_length.clone()
+                        }).collect::<Vec<_>>(),
+                    Fields::Missing() => vec![],
+                };
+                // Patch selected item's fields
+                if selected_item.uuid == i.uuid {
+                    item_fields = new_fields.iter().map(|f| storage::Field {
+                        name: f.name.clone(),
+                        designation: f.designation.clone(),
+                        value_length: f.value.len(),
+                    }).collect::<Vec<_>>();
+                }
+                storage::Item {
+                    uuid: i.uuid.clone(),
+                    name: i.name.clone(),
+                    url: i.url.clone(),
+                    fields: item_fields,
+                    tags: i.tags.clone(),
+                }
+            }).collect::<Vec<_>>();
+        storage::Account {
+            token: Some(match &a.token {
+                Token::Stale(t) => t,
+                Token::Fresh(t) => t,
+            }.clone()),
+            shorthand: a.shorthand.clone(),
+            email: a.email.clone(),
+            uuid: a.uuid.clone(),
+            items: account_items,
+        }
+    }).collect();
+
+    let cache = storage::Cache {
+        accounts
+    };
+
+    debug!("{:?}", cache);
+
+    cache::write(&cache)
 }
 
 fn format_field(field: &logical::FullField) -> String {
@@ -213,7 +265,7 @@ fn format_field(field: &logical::FullField) -> String {
 }
 
 fn format_redacted_field(field: &logical::RedactedField) -> String {
-    format!("Designation: {}, Field name: {}, Value: {}", field.designation, field.name, field.value_length)
+    format!("Designation: {}, Field name: {}, Value: {}", field.designation, field.name, "*".repeat(field.value_length))
 }
 
 fn select<T, H: Fn(&T) -> String, F: FnOnce() -> Result<()>>(items: &Vec<T>, format: H, foo: F) -> Result<Option<&T>> {

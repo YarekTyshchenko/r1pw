@@ -59,7 +59,7 @@ pub fn read() -> Result<storage::Cache> {
     Ok(cache)
 }
 
-fn write(cache: &storage::Cache) -> Result<()> {
+pub fn write(cache: &storage::Cache) -> Result<()> {
     let path = get_cache_path()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
