@@ -1,8 +1,9 @@
 Rust One Password Utility
 -------------------------
 
-This is a utility that plumbs 1Password's `op` utility with `dmenu` to
-allow easy selection of items from your accounts.
+This utility plumbs 1Password's `op` utility with `dmenu` to allow
+easy selection of items from your accounts, caching things for fast
+lookups.
 
 It requires a correctly configured `op` installation.
 
@@ -17,7 +18,7 @@ With thanks to the awesome
 [rust-lang](https://discord.com/invite/rust-lang) community on Discord!
 
 Installation
-============
+------------
 Source code is available on Github
 [https://github.com/YarekTyshchenko/r1pw](https://github.com/YarekTyshchenko/r1pw)
 
@@ -27,7 +28,7 @@ to a handy location which is in your `$PATH`.
 Ensure you have `dmenu`, `op`, and `xsel` installed
 
 How to use
-==========
+----------
 
 On first run of `r1pw` it will prompt you to unlock all accounts that
 are configured in `op`, storing their tokens, and list of items in
@@ -41,7 +42,7 @@ length of the password value to print some stars, to give some sort of
 indication of what you are about to copy).
 
 Disclaimer
-==========
+----------
 
 Be warned that this was hacked together while learning Rust, so expect
 various holes / security issues. Any feedback is welcome, constructive
