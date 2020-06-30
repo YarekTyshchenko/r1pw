@@ -4,7 +4,6 @@ mod clipboard;
 mod op;
 mod dmenu;
 
-use op::{Field, Item};
 use model::logical;
 use model::logical::*;
 use model::storage;
@@ -12,7 +11,6 @@ use model::storage;
 use log::*;
 use itertools::Itertools;
 use anyhow::{Result, Context, Error};
-use std::collections::HashMap;
 
 fn login_prompt(account: &Account) -> String {
     format!("Unlock for {} ({}):", account.shorthand, account.email)
@@ -74,7 +72,7 @@ fn copy_to_clipboard(field: &logical::FullField) {
 fn main() -> Result<()>{
     pretty_env_logger::init();
     // Read config and cache (as storage::Cache) and convert it into Logical cache
-    let mut cache = cache::read()?;
+    let cache = cache::read()?;
     if cache.accounts.is_empty() {
         return Err(Error::msg("No accounts found"))
     }
@@ -153,7 +151,7 @@ fn main() -> Result<()>{
     // @TODO: show previous selected item, if set.
     // @TODO: save previous item selection
     if let Some(selection) = select(&items, |item| {
-        return format!("{}: {}", item.account_name, item.name)
+        return format!("{} ({})", item.name, item.account_name)
     }, noop)? {
         // Display cached list if not empty
         let a = accounts.get_mut(selection.account_index).unwrap();

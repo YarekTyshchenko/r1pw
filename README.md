@@ -20,13 +20,18 @@ Source code is available on Github https://github.com/YarekTyshchenko/r1pw
 Clone, run `cargo build --release` and copy the binary from `target/`
 to a handy location which is in your `$PATH`.
 
+Ensure you have `dmenu`, `op`, and `xsel` installed
+
 How to use
 ==========
 
 On first run of `r1pw` it will prompt you to unlock all accounts that
 are configured in `op`, storing their tokens, and list of items in
-cache. On subsequent runs the cache will be re-used, yet actual
-password values will always be fetched from `op`. Only fields that are
-saved for are `name` and `designation` (as well as length of the
-password value to print some stars, to give some sort of indication of
-what you are about to copy).
+cache.
+
+On subsequent runs the cache will be re-used, yet actual password values
+will always be fetched from `op`.
+
+Only fields that are saved for are `name` and `designation` (as well as
+length of the password value to print some stars, to give some sort of
+indication of what you are about to copy).

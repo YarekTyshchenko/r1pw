@@ -11,5 +11,6 @@ pub struct OpAccount {
     pub shorthand: String,
     pub url: String,
     pub email: String,
-    pub userUUID: String,
+    #[serde(rename = "userUUID")]
+    pub user_uuid: String,
 }

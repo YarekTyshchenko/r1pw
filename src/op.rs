@@ -68,7 +68,7 @@ pub fn login(shorthand: &str, unlock: &str) -> Result<String> {
 pub fn op(input: &str, args: Vec<&str>) -> Result<String> {
     // Spawn signing, read out pipe for prompt
     let mut process = Command::new(
-        "/usr/local/bin/op"
+        "op"
         //"./mock.sh"
     );
     process.args(args)
