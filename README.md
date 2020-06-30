@@ -15,9 +15,10 @@ buffer with `xsel` utility.
 
 Installation
 ============
+Source code is available on Github https://github.com/YarekTyshchenko/r1pw
 
-run `cargo build --release` and copy the binary from `target/` into
-a handy location which is in your `$PATH`.
+Clone, run `cargo build --release` and copy the binary from `target/`
+to a handy location which is in your `$PATH`.
 
 How to use
 ==========
