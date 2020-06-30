@@ -7,6 +7,7 @@ pub struct Cache {
 pub enum Fields {
     Redacted(Vec<RedactedField>),
     Full(Vec<FullField>),
+    Missing(),
 }
 
 

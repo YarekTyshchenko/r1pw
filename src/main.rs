@@ -119,34 +119,43 @@ fn main() -> Result<()>{
         })
         .collect::<Result<Vec<logical::Account>>>()?;
 
-    let items: Vec<Vec<logical::Item>> = cache.accounts
+    // Compute items from all the accounts, querying for real items where they are empty
+    let items: Vec<logical::Item> = cache.accounts
         .into_iter()
         .enumerate()
         .map(|(index, account)| {
-            let mut items = account.items.into_iter().map(move |item| logical::Item {
+            let items: Vec<logical::Item> = account.items.into_iter().map(move |item| logical::Item {
                 account: index,
                 uuid: item.uuid.clone(),
                 name: item.name.clone(),
                 url: item.url.to_owned(),
                 tags: item.tags.clone(),
-                fields: logical::Fields::Redacted(item.fields.into_iter().map(move |field|logical::RedactedField {
+                fields: logical::Fields::Redacted(item.fields.into_iter().map(move |field| logical::RedactedField {
                     name: field.name.clone(),
                     designation: field.designation.clone(),
                     value_length: field.value_length,
                 }).collect()),
-            });
-            // if items.is_empty() {
-            //     let a = accounts.get_mut(index).unwrap();
-            //     let op_items = query_or_login(&login_prompt(a), &mut a.token, op::get_items);
-            //
-            // }
-            Ok(items.collect_vec())
-        })
-        .collect()?;
+            }).collect();
+            return items;
 
-    let items: Vec<logical::Item> = items.into_iter()
-        .flat_map(|item|item.into_iter())
+
+            // @TODO: Deal with this unwrap somehow
+            // let a = accounts.get_mut(index).unwrap();
+            // let op_items = query_or_login(&login_prompt(a), &mut a.token, op::get_items)?;
+            // let items = op_items.into_iter().map(move |item| logical::Item {
+            //     account: index,
+            //     uuid: item.uuid,
+            //     name: item.overview.title,
+            //     url: item.overview.url,
+            //     tags: item.overview.tags.into_iter().flatten().collect_vec(),
+            //     fields: logical::Fields::Missing(),
+            // }).collect();
+            //return Ok(items.into_iter());
+        })
         .collect();
+
+    // let items = items.into_iter()
+    //     .collect::<Vec<_>>();
 
     // if items.is_empty() {
     //     // go through each account, and populate items
@@ -193,7 +202,7 @@ fn main() -> Result<()>{
     //
     // }
     debug!("{:?}", accounts);
-    // debug!("{:?}", items);
+    debug!("{:?}", items);
     // // Read items from cache, unless its empty
     // let mut items = cache::read_items()?;
     // if ! items.is_empty() {
