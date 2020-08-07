@@ -3,6 +3,7 @@ use std::io::Write;
 use log::*;
 use serde::{ Serialize, Deserialize};
 use anyhow::{Result, Error, Context};
+use itertools::Itertools;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,8 +38,17 @@ pub struct Credential {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Details {
-    pub fields: Vec<Field>,
-    // pub password: Option<String>,
+    pub fields: Option<Vec<Field>>,
+    pub password: Option<String>,
+}
+impl Details {
+    pub fn get_fields(self) -> Vec<Field> {
+        self.fields.unwrap_or(self.password.into_iter().map(|password| Field {
+            value: password,
+            designation: "password".to_string(),
+            name: "password".to_string(),
+        }).collect_vec())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

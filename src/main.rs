@@ -160,7 +160,7 @@ fn main() -> Result<()>{
             Fields::Missing() => {
                 let fields = query_or_login(&a.shorthand, &login_prompt(a), &mut a.token, |t|op::get_credentials(&selection.uuid, t))?;
                 // Convert to actual fields
-                let fields: Vec<logical::FullField> = fields.details.fields.into_iter().map(|f| logical::FullField {
+                let fields: Vec<logical::FullField> = fields.details.get_fields().into_iter().map(|f| logical::FullField {
                     name: f.name,
                     designation: f.designation,
                     value: f.value
@@ -179,7 +179,7 @@ fn main() -> Result<()>{
                     full_fields.replace(query_or_login(
                         &a.shorthand, &login_prompt(a), &mut a.token, |t| {
                         let fields = op::get_credentials(&selection.uuid, t)?
-                            .details.fields.into_iter().map(|f| logical::FullField {
+                            .details.get_fields().into_iter().map(|f| logical::FullField {
                             name: f.name,
                             designation: f.designation,
                             value: f.value,
