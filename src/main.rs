@@ -12,15 +12,15 @@ use log::*;
 use itertools::Itertools;
 use anyhow::{Result, Context, Error};
 
-fn login_prompt(account: &Account) -> String {
+fn format_login_prompt(account: &Account) -> String {
     format!("Unlock for {} ({}):", account.shorthand, account.email)
 }
 
-fn query_or_login<T, F: Fn(&str) -> Result<T>>(shorthand: &str, prompt: &str, token: &mut Token, fun: F) -> Result<T> {
+fn query_or_login<T, F: Fn(&str) -> Result<T>>(shorthand: &str, prompt: &str, token: &mut Token, query_function: F) -> Result<T> {
     match &token {
-        Token::Fresh(t) => fun(t),
+        Token::Fresh(t) => query_function(t),
         Token::Stale(t) => {
-            match fun(t) {
+            match query_function(t) {
                 Ok(result) => {
                     *token = Token::Fresh(t.into());
                     Ok(result)
@@ -30,7 +30,7 @@ fn query_or_login<T, F: Fn(&str) -> Result<T>>(shorthand: &str, prompt: &str, to
                     match attempt_login(shorthand, prompt)? {
                         None => Err(Error::msg("Login cancelled. Unable to proceed without token")),
                         Some(t) => {
-                            let result = fun(&t);
+                            let result = query_function(&t);
                             // New fresh token given
                             *token = Token::Fresh(t);
                             result
@@ -129,7 +129,7 @@ fn main() -> Result<()>{
             if items.is_empty() {
                 // @TODO: Deal with this unwrap somehow
                 let account_shorthand = &a.shorthand;
-                let op_items = query_or_login(account_shorthand, &login_prompt(a), &mut a.token, |t|op::get_items(account_shorthand, t))?;
+                let op_items = query_or_login(account_shorthand, &format_login_prompt(a), &mut a.token, |t|op::get_items(account_shorthand, t))?;
                 let items = op_items.into_iter().map(|item| logical::Item {
                     account_name: account_shorthand.clone(),
                     account_index: index,
@@ -158,7 +158,7 @@ fn main() -> Result<()>{
         match &selection.fields {
             // Simply fetch them from remote and display
             Fields::Missing() => {
-                let fields = query_or_login(&a.shorthand, &login_prompt(a), &mut a.token, |t|op::get_credentials(&selection.uuid, t))?;
+                let fields = query_or_login(&a.shorthand, &format_login_prompt(a), &mut a.token, |t|op::get_credentials(&selection.uuid, t))?;
                 // Convert to actual fields
                 let fields: Vec<logical::FullField> = fields.details.get_fields().into_iter().map(|f| logical::FullField {
                     name: f.name,
@@ -176,27 +176,35 @@ fn main() -> Result<()>{
                 let mut full_fields: Option<Vec<logical::FullField>> = None;
                 let query_full_fields = || -> Result<()>{
                     debug!("Running something in the closure");
-                    full_fields.replace(query_or_login(
-                        &a.shorthand, &login_prompt(a), &mut a.token, |t| {
-                        let fields = op::get_credentials(&selection.uuid, t)?
-                            .details.get_fields().into_iter().map(|f| logical::FullField {
+                    op::get_credentials(&selection.uuid, &String::from(&a.token)).map(|credential| {
+                        credential.details.get_fields().into_iter().map(|f| logical::FullField {
                             name: f.name,
                             designation: f.designation,
                             value: f.value,
-                        })
-                            .collect::<Vec<_>>();
-                        Ok(fields)
-                    })?);
+                        }).collect::<Vec<_>>()
+                    }).map(|fields| full_fields.replace(fields));
                     Ok(())
                 };
                 let selected_field = select(&fields, |field| format_redacted_field(field), query_full_fields)?
                     .ok_or(Error::msg("User cancelled field choice"))?;
-                let full_fields = full_fields
-                    .ok_or(Error::msg("Full fields were never fetched. Likely programming error"))?;
 
-                    let field = full_fields.iter()
-                        .find(|i| selected_field.name == i.name)
-                        .ok_or(Error::msg("Selected field not found in full field list"))?;
+                let full_fields = full_fields.unwrap_or_else(||{
+                    query_or_login(
+                        &a.shorthand, &format_login_prompt(a), &mut a.token, |t| {
+                            let fields = op::get_credentials(&selection.uuid, t)?
+                                .details.get_fields().into_iter().map(|f| logical::FullField {
+                                name: f.name,
+                                designation: f.designation,
+                                value: f.value,
+                            })
+                                .collect::<Vec<_>>();
+                            Ok(fields)
+                        }).unwrap()
+                });
+
+                let field = full_fields.iter()
+                    .find(|i| selected_field.name == i.name)
+                    .ok_or(Error::msg("Selected field not found in full field list"))?;
 
                 copy_to_clipboard(field);
                 convert_cache(&accounts, &items, selection, &full_fields)?;
